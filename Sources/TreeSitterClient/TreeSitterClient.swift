@@ -54,7 +54,7 @@ public final class TreeSitterClient {
     // and tree-diffing will start to become noticibly laggy
     private let synchronousContentLengthThreshold: Int = 1_000_000
 
-    public let locationTransformer: Point.LocationTransformer
+    public let locationTransformer: Point.LocationTransformer?
     public var computeInvalidations: Bool
 
     /// Invoked when parts of the text content have changed
@@ -67,7 +67,7 @@ public final class TreeSitterClient {
     /// was true at the time an edit was applied.
     public var invalidationHandler: (IndexSet) -> Void
 
-    public init(language: Language, transformer: @escaping Point.LocationTransformer, synchronousLengthThreshold: Int = 1024) throws {
+    public init(language: Language, transformer: Point.LocationTransformer? = nil, synchronousLengthThreshold: Int = 1024) throws {
         self.parser = Parser()
         self.parseState = TreeSitterParseState(tree: nil)
         self.outstandingEdits = []
@@ -96,7 +96,7 @@ extension TreeSitterClient {
     ///
     /// - Parameter range: the range of content that will be affected by an edit
     public func willChangeContent(in range: NSRange) {
-        oldEndPoint = locationTransformer(range.max)
+        oldEndPoint = locationTransformer?(range.max)
     }
 
     /// Process a change in the underlying text content.
@@ -117,11 +117,11 @@ extension TreeSitterClient {
                                  limit: Int,
                                  readHandler: @escaping Parser.ReadBlock,
                                  completionHandler: @escaping () -> Void) {
-        guard let oldEndPoint = oldEndPoint else {
+        if locationTransformer != nil && oldEndPoint == nil {
             assertionFailure("oldEndPoint unavailable")
             return
         }
-
+        let oldEndPoint = self.oldEndPoint ?? .zero
         self.oldEndPoint = nil
 
         guard let inputEdit = InputEdit(range: range, delta: delta, oldEndPoint: oldEndPoint, transformer: locationTransformer) else {
@@ -255,6 +255,8 @@ extension TreeSitterClient {
     }
 
     private func dispatchInvalidatedSet(_ set: IndexSet) {
+		preconditionOnMainQueue()
+		
         let transformedSet = transformRangeSet(set)
 
         if transformedSet.isEmpty {
@@ -366,6 +368,31 @@ extension TreeSitterClient {
         try await withCheckedThrowingContinuation { continuation in
             self.executeResolvingQuery(query, in: range, executionMode: executionMode) { result in
                 continuation.resume(with: result)
+            }
+        }
+    }
+
+    /// Fetches the current stable version of Tree
+    ///
+    /// This function always fetches tree that represents the current state of the content, even if the
+    /// system is working in the background.
+    public func currentTree(completionHandler: @escaping (Result<Tree, TreeSitterClientError>) -> Void) {
+        let startedVersion = version
+        queue.async {
+            self.semaphore.wait()
+            let state = self.parseState.copy()
+            self.semaphore.signal()
+
+            OperationQueue.main.addOperation {
+                guard startedVersion == self.version else {
+                    completionHandler(.failure(.staleContent))
+                    return
+                }
+                if let tree = state.tree {
+                    completionHandler(.success(tree))
+                } else {
+                    completionHandler(.failure(.stateInvalid))
+                }
             }
         }
     }

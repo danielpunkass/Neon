@@ -1,32 +1,8 @@
-import Foundation
 #if os(macOS)
 import AppKit
+import Rearrange
 
-extension NSTextView {
-    func textRange(for rect: CGRect) -> NSRange {
-        let length = self.textStorage?.length ?? 0
-
-        guard let layoutManager = self.layoutManager else {
-            return NSRange(0..<length)
-        }
-
-        guard let container = self.textContainer else {
-            return NSRange(0..<length)
-        }
-
-        let origin = textContainerOrigin
-        let offsetRect = rect.offsetBy(dx: -origin.x, dy: -origin.y)
-
-        let glyphRange = layoutManager.glyphRange(forBoundingRect: offsetRect, in: container)
-
-        return layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
-    }
-
-    var visibleTextRange: NSRange {
-        return textRange(for: visibleRect)
-    }
-}
-
+@available(*, deprecated, message: "TextViewSystemInterface should be used instead")
 public struct TextContainerSystemInterface {
     public typealias AttributeProvider = (Token) -> [NSAttributedString.Key: Any]?
 
@@ -41,21 +17,46 @@ public struct TextContainerSystemInterface {
     public var layoutManager: NSLayoutManager? {
         return textContainer.layoutManager
     }
+
+	@available(macOS 12.0, iOS 15.0, tvOS 15.0, *)
+	public var textLayoutManager: NSTextLayoutManager? {
+		return textContainer.textLayoutManager
+	}
 }
 
+@available(*, deprecated, message: "TextViewSystemInterface should be used instead")
 extension TextContainerSystemInterface: TextSystemInterface {
-    public func clearStyle(in range: NSRange) {
-        assert(range.max <= length, "range is out of bounds, is the text state being updated correctly?")
+	private func setAttributes(_ attrs: [NSAttributedString.Key : Any], in range: NSRange) {
+		let endLocation = min(range.max, length)
 
-        layoutManager?.setTemporaryAttributes([:], forCharacterRange: range)
+		assert(endLocation == range.max, "range is out of bounds, is the text state being updated correctly?")
+
+		let clampedRange = NSRange(range.location..<endLocation)
+
+		#if os(macOS)
+		layoutManager?.setTemporaryAttributes(attrs, forCharacterRange: clampedRange)
+		#endif
+
+		guard
+			#available(macOS 12, iOS 15.0, tvOS 15.0, *),
+			let textLayoutManager = textLayoutManager,
+			let contentManager = textLayoutManager.textContentManager,
+			let textRange = NSTextRange(clampedRange, provider: contentManager)
+		else {
+			return
+		}
+
+		textLayoutManager.setRenderingAttributes(attrs, for: textRange)
+	}
+
+    public func clearStyle(in range: NSRange) {
+		setAttributes([:], in: range)
     }
 
     public func applyStyle(to token: Token) {
-        assert(token.range.max <= length, "range is out of bounds, is the text state being updated correctly?")
-
         guard let attrs = attributeProvider(token) else { return }
 
-        layoutManager?.setTemporaryAttributes(attrs, forCharacterRange: token.range)
+		setAttributes(attrs, in: token.range)
     }
 
     public var length: Int {
