@@ -43,8 +43,7 @@ public final class TreeSitterClient {
     }
 
     private var oldEndPoint: Point?
-    private let parser: Parser
-    private var parseState: TreeSitterParseState
+    private var parseState: TreeSitterParseLayer
     private var outstandingEdits: [ContentEdit]
     private var version: Int
     private let queue: DispatchQueue
@@ -70,15 +69,12 @@ public final class TreeSitterClient {
     public var invalidationHandler: (IndexSet) -> Void
 
     public init(language: Language, transformer: Point.LocationTransformer? = nil, synchronousLengthThreshold: Int = 1024) throws {
-        self.parser = Parser()
-        self.parseState = TreeSitterParseState(tree: nil)
+        self.parseState = try TreeSitterParseLayer(language: language)
         self.outstandingEdits = []
         self.computeInvalidations = true
         self.version = 0
         self.queue = DispatchQueue(label: "com.chimehq.Neon.TreeSitterClient")
         self.semaphore = DispatchSemaphore(value: 1)
-
-        try parser.setLanguage(language)
 
         self.invalidationHandler = { _ in }
         self.locationTransformer = transformer
@@ -179,15 +175,14 @@ extension TreeSitterClient {
         processEditAsync(edit, withInvalidations: doInvalidations, readHandler: readHandler, completionHandler: completionHandler)
     }
 
-    private func applyEdit(_ edit: ContentEdit, readHandler: @escaping Parser.ReadBlock) -> (TreeSitterParseState, TreeSitterParseState) {
+    private func applyEdit(_ edit: ContentEdit, readHandler: @escaping Parser.ReadBlock) -> (TreeSitterParseLayer, TreeSitterParseLayer) {
         self.semaphore.wait()
-        let state = self.parseState
+		let oldState = self.parseState.copy()
 
-        state.applyEdit(edit.inputEdit)
-        self.parseState = self.parser.parse(state: state, readHandler: readHandler)
+		self.parseState.applyEdit(edit.inputEdit)
+		self.parseState = self.parseState.parser.parse(state: self.parseState, readHandler: readHandler)
 
-        let oldState = state.copy()
-        let newState = parseState.copy()
+		let newState = self.parseState.copy()
 
         self.semaphore.signal()
 
@@ -227,7 +222,7 @@ extension TreeSitterClient {
         }
     }
 
-    func computeInvalidatedSet(from oldState: TreeSitterParseState, to newState: TreeSitterParseState, with edit: ContentEdit) -> IndexSet {
+    func computeInvalidatedSet(from oldState: TreeSitterParseLayer, to newState: TreeSitterParseLayer, with edit: ContentEdit) -> IndexSet {
         let changedRanges = oldState.changedByteRanges(for: newState).map({ $0.range })
 
         // we have to ensure that any invalidated ranges don't fall outside of limit
@@ -385,9 +380,9 @@ extension TreeSitterClient {
     ///
     /// This function always fetches the tree that represents the current state of the content, even if the
     /// system is working in the background.
-    public func currentTree(completionHandler: @escaping (Result<Tree, TreeSitterClientError>) -> Void) {
+    public func currentState(completionHandler: @escaping (Result<TreeSitterParseLayer, TreeSitterClientError>) -> Void) {
         let startedVersion = version
-        queue.async {
+		queue.async {
             self.semaphore.wait()
             let state = self.parseState.copy()
             self.semaphore.signal()
@@ -397,11 +392,7 @@ extension TreeSitterClient {
                     completionHandler(.failure(.staleContent))
                     return
                 }
-                if let tree = state.tree {
-                    completionHandler(.success(tree))
-                } else {
-                    completionHandler(.failure(.stateInvalid))
-                }
+				completionHandler(.success(state))
             }
         }
     }
@@ -432,7 +423,7 @@ extension TreeSitterClient {
 		return result
     }
 
-    private func executeResolvingQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, with state: TreeSitterParseState) -> ResolvingQueryCursorResult {
+    private func executeResolvingQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, with state: TreeSitterParseLayer) -> ResolvingQueryCursorResult {
         return executeQuerySynchronouslyWithoutCheck(query, in: range, with: state)
             .map({ ResolvingQueryCursor(cursor: $0) })
     }
@@ -449,7 +440,7 @@ extension TreeSitterClient {
         return executeQuerySynchronouslyWithoutCheck(query, in: range, with: parseState)
     }
 
-    private func executeQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, with state: TreeSitterParseState) -> QueryCursorResult {
+    private func executeQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, with state: TreeSitterParseLayer) -> QueryCursorResult {
         guard let node = state.tree?.rootNode else {
             return .failure(.stateInvalid)
         }
