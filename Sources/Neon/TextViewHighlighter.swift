@@ -74,8 +74,8 @@ public final class TextViewHighlighter: NSObject {
 		treeSitterClient.invalidationHandler = { [weak self] in self?.handleInvalidation($0) }
 	}
 
-	public convenience init(textView: TextView, language: Language, highlightQuery: Query, attributeProvider: @escaping TextViewSystemInterface.AttributeProvider) throws {
-		let client = try TreeSitterClient(language: language, transformer: { _ in return .zero })
+	public convenience init(textView: TextView, language: LanguageSpecifier, injectedLanguages:[String:LanguageSpecifier], highlightQuery: Query, attributeProvider: @escaping TextViewSystemInterface.AttributeProvider) throws {
+		let client = try TreeSitterClient(baseLanguage: language, injectedLanguages: injectedLanguages, transformer: { _ in return .zero })
 
 		try self.init(textView: textView, client: client, highlightQuery: highlightQuery, attributeProvider: attributeProvider)
 	}

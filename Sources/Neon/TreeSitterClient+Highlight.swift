@@ -5,7 +5,10 @@ import TreeSitterClient
 extension TreeSitterClient {
     private func tokensFromCursor(_ cursor: ResolvingQueryCursor) -> [Token] {
         return cursor
-            .map({ $0.captures })
+            .map({
+				let captures = $0.captures
+				return captures
+			})
             .flatMap({ $0 })
             .sorted()
             .compactMap { capture -> Token? in
@@ -17,10 +20,11 @@ extension TreeSitterClient {
 
     public func executeHighlightsQuery(_ query: Query,
                                        in range: NSRange,
+									   of layer: TreeSitterParseLayer,
                                        executionMode: ExecutionMode = .asynchronous(prefetch: true),
                                        textProvider: TextProvider? = nil,
                                        completionHandler: @escaping (Result<[Token], TreeSitterClientError>) -> Void) {
-		executeResolvingQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+		executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
             let result = cursorResult.map({ self.tokensFromCursor($0) })
 
             completionHandler(result)
@@ -31,14 +35,61 @@ extension TreeSitterClient {
     @MainActor
     public func highlights(with query: Query,
                            in range: NSRange,
+						   of layer: TreeSitterParseLayer,
                            executionMode: ExecutionMode = .asynchronous(prefetch: true),
                            textProvider: TextProvider? = nil) async throws -> [Token] {
         try await withCheckedThrowingContinuation { continuation in
-            self.executeHighlightsQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeHighlightsQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { result in
                 continuation.resume(with: result)
             }
         }
     }
+
+	// Transitioning to an arrangement where we're configured with the information we need to execute a default
+	// highlighting query based on the base and injected language specifiers.
+	public func executeDefaultHighlightingQuery(in range: NSRange,
+												executionMode: ExecutionMode = .asynchronous(prefetch: true),
+												textProvider: TextProvider? = nil,
+												completionHandler: @escaping (Result<[Token], TreeSitterClientError>) -> Void) {
+		var tokens: [Token] = []
+		var error: TreeSitterClientError? = nil
+
+		// For a consistent coloring we wait until all the pertinent tokenizing actions are done and return the tokens all at once
+		let waitingGroup = DispatchGroup()
+		waitingGroup.enter()
+		waitingGroup.notify(queue: .main) {
+			if let error = error {
+				completionHandler(.failure(error))
+			}
+			else {
+				completionHandler(.success(tokens))
+			}
+		}
+
+		// Invokes a query for the given layer and recurses on any subLayers
+		func requestTokens(for layer: TreeSitterParseLayer) {
+			if let query = layer.baseLanguage.highlightingQuery {
+				waitingGroup.enter()
+				executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+					switch cursorResult.map({ self.tokensFromCursor($0) }) {
+						case .success(let layerTokens):
+							tokens.append(contentsOf: layerTokens)
+						case .failure(let layerError):
+							error = layerError
+					}
+					waitingGroup.leave()
+				}
+			}
+
+			for (_, layer) in layer.subLayers {
+				requestTokens(for: layer)
+			}
+		}
+
+		requestTokens(for: self.baseLayer)
+		
+		waitingGroup.leave()
+	}
 }
 
 extension TreeSitterClient {
@@ -51,7 +102,7 @@ extension TreeSitterClient {
 				return
 			}
 
-			self.executeHighlightsQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeHighlightsQuery(query, in: range, of: self.baseLayer, executionMode: executionMode, textProvider: textProvider) { result in
 				let tokenApp = result
 					.map({ TokenApplication(tokens: $0) })
 					.mapError({ $0 as Error })

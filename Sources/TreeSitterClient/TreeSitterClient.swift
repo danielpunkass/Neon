@@ -42,8 +42,11 @@ public final class TreeSitterClient {
         }
     }
 
+	public let baseLanguage: LanguageSpecifier
+	public var baseLayer: TreeSitterParseLayer
+	public let injectedLanguages: [String:LanguageSpecifier]
+
     private var oldEndPoint: Point?
-    private var parseState: TreeSitterParseLayer
     private var outstandingEdits: [ContentEdit]
     private var version: Int
     private let queue: DispatchQueue
@@ -68,8 +71,10 @@ public final class TreeSitterClient {
     /// was true at the time an edit was applied.
     public var invalidationHandler: (IndexSet) -> Void
 
-    public init(language: Language, transformer: Point.LocationTransformer? = nil, synchronousLengthThreshold: Int = 1024) throws {
-        self.parseState = try TreeSitterParseLayer(language: language)
+	public init(baseLanguage: LanguageSpecifier, injectedLanguages: [String:LanguageSpecifier] = [:], transformer: Point.LocationTransformer? = nil, synchronousLengthThreshold: Int = 1024) throws {
+		self.baseLanguage = baseLanguage
+		self.injectedLanguages = injectedLanguages
+		self.baseLayer = try TreeSitterParseLayer(text: "", baseLanguage: baseLanguage, injectedLanguages: injectedLanguages)
         self.outstandingEdits = []
         self.computeInvalidations = true
         self.version = 0
@@ -177,12 +182,12 @@ extension TreeSitterClient {
 
     private func applyEdit(_ edit: ContentEdit, readHandler: @escaping Parser.ReadBlock) -> (TreeSitterParseLayer, TreeSitterParseLayer) {
         self.semaphore.wait()
-		let oldState = self.parseState.copy()
+		let oldState = self.baseLayer.copy()
 
-		self.parseState.applyEdit(edit.inputEdit)
-		self.parseState = self.parseState.parser.parse(state: self.parseState, readHandler: readHandler)
+		self.baseLayer.applyEdit(edit.inputEdit)
+		self.baseLayer = self.baseLayer.parse(readHandler: readHandler)
 
-		let newState = self.parseState.copy()
+		let newState = self.baseLayer.copy()
 
         self.semaphore.signal()
 
@@ -289,6 +294,7 @@ extension TreeSitterClient {
     /// - Parameter completionHandler: returns the result
     public func executeResolvingQuery(_ query: Query,
                                       in range: NSRange,
+									  of layer: TreeSitterParseLayer,
                                       executionMode: ExecutionMode = .asynchronous(prefetch: true),
 									  textProvider: TextProvider? = nil,
                                       completionHandler: @escaping (ResolvingQueryCursorResult) -> Void) {
@@ -298,21 +304,21 @@ extension TreeSitterClient {
 
         switch executionMode {
         case .synchronous:
-			let result = executeResolvingQuerySynchronously(query, in: range, textProvider: textProvider)
+				let result = executeResolvingQuerySynchronously(query, in: range, of: layer, textProvider: textProvider)
             completionHandler(result)
             return
         case .failIfAsynchronous:
             if canAttemptSynchronousQuery(in: range) == false {
                 completionHandler(.failure(.asyncronousExecutionRequired))
             } else {
-                let result = executeResolvingQuerySynchronously(query, in: range, textProvider: textProvider)
+                let result = executeResolvingQuerySynchronously(query, in: range, of: layer, textProvider: textProvider)
                 completionHandler(result)
             }
 
             return
         case .synchronousPreferred:
             if canAttemptSynchronousQuery(in: range) {
-                let result = executeResolvingQuerySynchronously(query, in: range, textProvider: textProvider)
+                let result = executeResolvingQuerySynchronously(query, in: range, of: layer, textProvider: textProvider)
                 completionHandler(result)
                 return
             }
@@ -331,13 +337,13 @@ extension TreeSitterClient {
             // let's be optimistic and only check once at the end.
 
             self.semaphore.wait()
-            let state = self.parseState.copy()
+            let layerCopy = layer.copy()
             self.semaphore.signal()
 
             DispatchQueue.global().async {
                 let result = self.executeResolvingQuerySynchronouslyWithoutCheck(query,
                                                                                  in: range,
-                                                                                 with: state)
+																				 of: layerCopy)
 
                 if case .success(let cursor) = result, prefetchMatches {
                     cursor.prefetchMatches()
@@ -367,10 +373,11 @@ extension TreeSitterClient {
     @MainActor
     public func resolvingQueryCursor(with query: Query,
                                      in range: NSRange,
+									 of layer: TreeSitterParseLayer,
                                      executionMode: ExecutionMode = .asynchronous(prefetch: true),
 									 textProvider: TextProvider? = nil) async throws -> ResolvingQueryCursor {
         try await withCheckedThrowingContinuation { continuation in
-			self.executeResolvingQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { result in
                 continuation.resume(with: result)
             }
         }
@@ -384,7 +391,7 @@ extension TreeSitterClient {
         let startedVersion = version
 		queue.async {
             self.semaphore.wait()
-            let state = self.parseState.copy()
+            let state = self.baseLayer.copy()
             self.semaphore.signal()
 
             OperationQueue.main.addOperation {
@@ -407,14 +414,14 @@ extension TreeSitterClient {
 	/// - Parameter query: the query to execute
 	/// - Parameter range: constrain the query to this range
 	/// - Parameter textProvider: the ResolvingQueryCursor.TextProvider used for predicate resolution
-    public func executeResolvingQuerySynchronously(_ query: Query, in range: NSRange, textProvider: TextProvider? = nil) -> ResolvingQueryCursorResult {
+	public func executeResolvingQuerySynchronously(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer, textProvider: TextProvider? = nil) -> ResolvingQueryCursorResult {
         preconditionOnMainQueue()
 
         if hasQueuedWork {
             return .failure(.staleState)
         }
 
-        let result = executeResolvingQuerySynchronouslyWithoutCheck(query, in: range, with: parseState)
+        let result = executeResolvingQuerySynchronouslyWithoutCheck(query, in: range, of: layer)
 
 		if let textProvider = textProvider, let cursor = try? result.get() {
 			cursor.prepare(with: textProvider)
@@ -423,30 +430,30 @@ extension TreeSitterClient {
 		return result
     }
 
-    private func executeResolvingQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, with state: TreeSitterParseLayer) -> ResolvingQueryCursorResult {
-        return executeQuerySynchronouslyWithoutCheck(query, in: range, with: state)
+    private func executeResolvingQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer) -> ResolvingQueryCursorResult {
+        return executeQuerySynchronouslyWithoutCheck(query, in: range, of: layer)
             .map({ ResolvingQueryCursor(cursor: $0) })
     }
 }
 
 extension TreeSitterClient {
-    public func executeQuerySynchronously(_ query: Query, in range: NSRange) -> QueryCursorResult {
+	public func executeQuerySynchronously(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer) -> QueryCursorResult {
         preconditionOnMainQueue()
 
         if hasQueuedWork {
             return .failure(.staleState)
         }
 
-        return executeQuerySynchronouslyWithoutCheck(query, in: range, with: parseState)
+        return executeQuerySynchronouslyWithoutCheck(query, in: range, of: layer)
     }
 
-    private func executeQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, with state: TreeSitterParseLayer) -> QueryCursorResult {
-        guard let node = state.tree?.rootNode else {
+    private func executeQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer) -> QueryCursorResult {
+        guard let node = layer.tree?.rootNode else {
             return .failure(.stateInvalid)
         }
 
         // critical to keep a reference to the tree, so it survives as long as the query
-        let cursor = query.execute(node: node, in: state.tree)
+        let cursor = query.execute(node: node, in: layer.tree)
 
         cursor.setRange(range)
 
@@ -460,10 +467,11 @@ extension TreeSitterClient {
 	/// Note that some injection query definitions require evaluating the text content, which is only possible by supplying a `textProvider`.
 	public func executeInjectionsQuery(_ query: Query,
 									   in range: NSRange,
+									   of layer: TreeSitterParseLayer,
 									   executionMode: ExecutionMode = .asynchronous(prefetch: true),
 									   textProvider: TextProvider? = nil,
 									   completionHandler: @escaping (Result<[NamedRange], TreeSitterClientError>) -> Void) {
-		executeResolvingQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+		executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
 			let result = cursorResult.map({ cursor in
 				cursor.compactMap({ $0.injection(with: textProvider) })
 			})
@@ -477,10 +485,11 @@ extension TreeSitterClient {
 	@MainActor
 	public func injections(with query: Query,
 						   in range: NSRange,
+						   of layer: TreeSitterParseLayer,
 						   executionMode: ExecutionMode = .asynchronous(prefetch: true),
 						   textProvider: TextProvider? = nil) async throws -> [NamedRange] {
 		try await withCheckedThrowingContinuation { continuation in
-			self.executeInjectionsQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeInjectionsQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { result in
 				continuation.resume(with: result)
 			}
 		}
