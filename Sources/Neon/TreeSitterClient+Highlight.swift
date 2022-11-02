@@ -5,10 +5,7 @@ import TreeSitterClient
 extension TreeSitterClient {
     private func tokensFromCursor(_ cursor: ResolvingQueryCursor) -> [Token] {
         return cursor
-            .map({
-				let captures = $0.captures
-				return captures
-			})
+            .map({ $0.captures })
             .flatMap({ $0 })
             .sorted()
             .compactMap { capture -> Token? in
