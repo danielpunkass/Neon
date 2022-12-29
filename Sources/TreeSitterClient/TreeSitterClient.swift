@@ -113,7 +113,7 @@ extension TreeSitterClient {
     /// - Parameter range: the range that was affected by the edit
     /// - Parameter delta: the change in length of the content
     /// - Parameter limit: the current length of the content
-    /// - Parameter readerHandler: a function that returns the text data
+    /// - Parameter readHandler: a function that returns the text data
     /// - Parameter completionHandler: invoked when the edit has been fully processed
     public func didChangeContent(in range: NSRange,
                                  delta: Int,
@@ -185,7 +185,10 @@ extension TreeSitterClient {
 		let oldState = self.baseLayer.copy()
 
 		self.baseLayer.applyEdit(edit.inputEdit)
-		self.baseLayer = self.baseLayer.parse(readHandler: readHandler)
+
+		// Workaround a tree corruption bug that happens with complex edits
+		let forceReparse = (edit.inputEdit.newEndByte - edit.inputEdit.startByte) > 2
+		self.baseLayer = self.baseLayer.parse(readHandler: readHandler, forceReparse: forceReparse)
 
 		let newState = self.baseLayer.copy()
 

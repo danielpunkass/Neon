@@ -74,7 +74,7 @@ public struct TreeSitterParseLayer {
         return root.descendant(in: range)
     }
 
-	mutating func parse(readHandler: @escaping Parser.ReadBlock) -> TreeSitterParseLayer {
+	mutating func parse(readHandler: @escaping Parser.ReadBlock, forceReparse: Bool = false) -> TreeSitterParseLayer {
 		var newState = self.copy()
 		newState.trees = []
 
@@ -85,7 +85,7 @@ public struct TreeSitterParseLayer {
 			self.parser.includedRanges = self.rangesToParse
 		}
 
-		if self.trees.count == 0 {
+		if forceReparse || self.trees.count == 0 {
 			if let updatedTree = self.parser.parse(tree: nil, readBlock: readHandler) {
 				newState.trees.append(updatedTree)
 			}
