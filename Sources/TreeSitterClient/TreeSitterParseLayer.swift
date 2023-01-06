@@ -157,16 +157,25 @@ public struct TreeSitterParseLayer {
     func changedByteRanges(for otherState: TreeSitterParseLayer) -> [Range<UInt32>] {
         let otherTree = otherState.tree
 
+		// As a stop-gap solution add the entire range of subLayers - until and unless
+		// we can do a more optimal job detecting and including just the actual changes within?
+		var baseRanges: [Range<UInt32>] = []
+
         switch (tree, otherTree) {
         case (let t1?, let t2?):
-            return t1.changedRanges(from: t2).map({ $0.bytes })
-        case (nil, let t2?):
+			baseRanges = t1.changedRanges(from: t2).map({ $0.bytes })
+		case (nil, let t2?):
             let range = t2.rootNode?.byteRange
-
-            return range.flatMap({ [$0] }) ?? []
+			baseRanges = range.flatMap({ [$0] }) ?? []
         case (_, nil):
-            return []
+            baseRanges = []
         }
+
+		for subLayer in self.subLayers.values {
+			baseRanges += subLayer.rangesToParse.map { $0.bytes }
+		}
+		
+		return baseRanges
     }
 
     func copy() -> TreeSitterParseLayer {
