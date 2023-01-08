@@ -289,7 +289,7 @@ extension TreeSitterClient {
     /// - Parameter query: the query to execute
     /// - Parameter range: constrain the query to this range
     /// - Parameter executionMode: determine if a background query should be used
-	/// - Parameter textProvider: the ResolvingQueryCursor.TextProvider used for predicate resolution
+	/// - Parameter textProvider: the `ResolvingQueryCursor.TextProvider` used for predicate resolution
     /// - Parameter completionHandler: returns the result
     public func executeResolvingQuery(_ query: Query,
                                       in range: NSRange,
@@ -433,14 +433,10 @@ extension TreeSitterClient {
     /// This function always fetches the tree that represents the current state of the content, even if the
     /// system is working in the background.
     @available(macOS 10.15, iOS 13.0, watchOS 6.0.0, tvOS 13.0.0, *)
-    public func currentTree() async throws -> Tree? {
+    public func currentTree() async throws -> Tree {
         try await withCheckedThrowingContinuation { continuation in
             currentTree() { result in
-                switch result {
-                case .failure: continuation.resume(returning: nil)
-                case .success(let tree):
-                    continuation.resume(returning: tree)
-                }
+				continuation.resume(with: result)
             }
         }
     }

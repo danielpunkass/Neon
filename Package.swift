@@ -3,19 +3,24 @@
 import PackageDescription
 
 let package = Package(
-    name: "Neon",
+	name: "Neon",
 	platforms: [.macOS(.v10_13), .iOS(.v11), .tvOS(.v11), .watchOS(.v4)],
-    products: [
-        .library(name: "Neon", targets: ["Neon"]),
-    ],
-    dependencies: [
-		.package(url: "https://github.com/danielpunkass/SwiftTreeSitter", revision: "1081e8a50a494db8ecbb69e79231c9e4994fc07a"),
-        .package(url: "https://github.com/ChimeHQ/Rearrange", from: "1.5.3"),
-    ],
-    targets: [
-        .target(name: "Neon", dependencies: ["SwiftTreeSitter", "Rearrange", "TreeSitterClient"]),
-        .target(name: "TreeSitterClient", dependencies: ["Rearrange", "SwiftTreeSitter"]),
-        .testTarget(name: "NeonTests", dependencies: ["Neon"]),
-        .testTarget(name: "TreeSitterClientTests", dependencies: ["TreeSitterClient"])
-    ]
+	products: [
+		.library(name: "Neon", targets: ["Neon"]),
+	],
+	dependencies: [
+        .package(url: "https://github.com/danielpunkass/SwiftTreeSitter", revision: "1081e8a50a494db8ecbb69e79231c9e4994fc07a"),
+		.package(url: "https://github.com/ChimeHQ/Rearrange", from: "1.5.3"),
+	],
+	targets: [
+		.target(name: "Neon", dependencies: ["SwiftTreeSitter", "Rearrange", "TreeSitterClient"]),
+		.target(name: "TreeSitterClient", dependencies: ["Rearrange", "SwiftTreeSitter"]),
+		.target(name: "TestTreeSitterSwift",
+				path: "tree-sitter-swift",
+				sources: ["src/parser.c", "src/scanner.c"],
+				publicHeadersPath: "bindings/swift",
+				cSettings: [.headerSearchPath("src")]),
+		.testTarget(name: "NeonTests", dependencies: ["Neon"]),
+		.testTarget(name: "TreeSitterClientTests", dependencies: ["TreeSitterClient", "TestTreeSitterSwift"])
+	]
 )
