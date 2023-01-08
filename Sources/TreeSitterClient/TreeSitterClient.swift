@@ -403,6 +403,31 @@ extension TreeSitterClient {
         }
     }
 
+	/// Fetches the current stable version of Tree
+	///
+	/// This function always fetches the tree that represents the current state of the content, even if the
+	/// system is working in the background.
+	public func currentTree(completionHandler: @escaping (Result<Tree, TreeSitterClientError>) -> Void) {
+		let startedVersion = version
+		queue.async {
+			self.semaphore.wait()
+			let state = self.baseLayer.copy()
+			self.semaphore.signal()
+
+			OperationQueue.main.addOperation {
+				guard startedVersion == self.version else {
+					completionHandler(.failure(.staleContent))
+					return
+				}
+				if let tree = state.tree {
+					completionHandler(.success(tree))
+				} else {
+					completionHandler(.failure(.stateInvalid))
+				}
+			}
+		}
+	}
+
     /// Fetches the current stable version of Tree
     ///
     /// This function always fetches the tree that represents the current state of the content, even if the
