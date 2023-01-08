@@ -212,21 +212,17 @@ extension TreeSitterClient {
 
         queue.async {
             let (oldState, newState) = self.applyEdit(edit, readHandler: readHandler)
+			let set = doInvalidations ? self.computeInvalidatedSet(from: oldState, to: newState, with: edit) : IndexSet()
 
-            DispatchQueue.global().async {
-                // we can safely compute the invalidations on another queue
-                let set = doInvalidations ? self.computeInvalidatedSet(from: oldState, to: newState, with: edit) : IndexSet()
+			OperationQueue.main.addOperation {
+				let completedEdit = self.outstandingEdits.removeFirst()
 
-                OperationQueue.main.addOperation {
-                    let completedEdit = self.outstandingEdits.removeFirst()
+				assert(completedEdit.inputEdit == edit.inputEdit)
 
-                    assert(completedEdit.inputEdit == edit.inputEdit)
+				self.dispatchInvalidatedSet(set)
 
-                    self.dispatchInvalidatedSet(set)
-
-                    completionHandler()
-                }
-            }
+				completionHandler()
+			}
         }
     }
 
