@@ -7,7 +7,7 @@ public enum TreeSitterClientError: Error {
     case stateInvalid
     case staleContent
     case queryFailed(Error)
-    case asyncronousExecutionRequired
+    case asynchronousExecutionRequired
 }
 
 public final class TreeSitterClient {
@@ -55,7 +55,7 @@ public final class TreeSitterClient {
 
     // This was roughly determined to be the limit in characters
     // before it's likely that tree-sitter edit processing
-    // and tree-diffing will start to become noticibly laggy
+    // and tree-diffing will start to become noticeably laggy
     private let synchronousContentLengthThreshold: Int = 1_000_000
 
     public let locationTransformer: Point.LocationTransformer?
@@ -137,7 +137,7 @@ extension TreeSitterClient {
         // has already changed. That's why it's optional!
         //
         // So, why use RangeMutation at all? Because we want to make use of its
-        // tranformation capabilities for invalidations.
+        // transformation capabilities for invalidations.
         let mutation = RangeMutation(range: range, delta: delta)
         let edit = ContentEdit(rangeMutation: mutation, inputEdit: inputEdit, limit: limit)
 
@@ -149,7 +149,7 @@ extension TreeSitterClient {
     /// This method is similar to `didChangeContent(in:delta:limit:readHandler:completionHandler:)`,
     /// but it makes use of the immutability of String to meet the content
     /// requirements. This makes it much easier to use. However,
-    /// this approach may not be able to acheive the same level of performance.
+    /// this approach may not be able to achieve the same level of performance.
     ///
     /// - Parameter string: the text content with the change applied
     /// - Parameter range: the range that was affected by the edit
@@ -171,6 +171,8 @@ extension TreeSitterClient {
         let largeDocument = edit.limit > synchronousContentLengthThreshold
         let runAsync = hasQueuedWork || largeEdit || largeDocument
         let doInvalidations = computeInvalidations
+
+		self.version += 1
 
         if runAsync == false {
             processEditSync(edit, withInvalidations: doInvalidations, readHandler: readHandler, completionHandler: completionHandler)
@@ -308,7 +310,7 @@ extension TreeSitterClient {
             return
         case .failIfAsynchronous:
             if canAttemptSynchronousQuery(in: range) == false {
-                completionHandler(.failure(.asyncronousExecutionRequired))
+                completionHandler(.failure(.asynchronousExecutionRequired))
             } else {
                 let result = executeResolvingQuerySynchronously(query, in: range, of: layer, textProvider: textProvider)
                 completionHandler(result)
@@ -387,6 +389,8 @@ extension TreeSitterClient {
     /// This function always fetches the tree that represents the current state of the content, even if the
     /// system is working in the background.
     public func currentState(completionHandler: @escaping (Result<TreeSitterParseLayer, TreeSitterClientError>) -> Void) {
+		preconditionOnMainQueue()
+
         let startedVersion = version
 		queue.async {
             self.semaphore.wait()
@@ -433,6 +437,7 @@ extension TreeSitterClient {
     /// This function always fetches the tree that represents the current state of the content, even if the
     /// system is working in the background.
     @available(macOS 10.15, iOS 13.0, watchOS 6.0.0, tvOS 13.0.0, *)
+	@MainActor
     public func currentTree() async throws -> Tree {
         try await withCheckedThrowingContinuation { continuation in
             currentTree() { result in
@@ -499,9 +504,40 @@ extension TreeSitterClient {
 }
 
 extension TreeSitterClient {
+	/// Execute a standard highlights.scm query
+	///
+	/// Note that some query definitions require evaluating the text content, which is only possible by supplying a `textProvider`.
+	public func executeHighlightsQuery(_ query: Query,
+									   in range: NSRange,
+									   executionMode: ExecutionMode = .asynchronous(prefetch: true),
+									   textProvider: TextProvider? = nil,
+									   completionHandler: @escaping (Result<[NamedRange], TreeSitterClientError>) -> Void) {
+		executeResolvingQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+			let result = cursorResult.map { $0.highlights() }
+
+			completionHandler(result)
+		}
+	}
+
+	/// Execute a standard highlights.scm query
+	///
+	/// Note that some query definitions require evaluating the text content, which is only possible by supplying a `textProvider`.
+	@available(macOS 10.15, iOS 13.0, watchOS 6.0.0, tvOS 13.0.0, *)
+	@MainActor
+	public func highlights(with query: Query,
+						   in range: NSRange,
+						   executionMode: ExecutionMode = .asynchronous(prefetch: true),
+						   textProvider: TextProvider? = nil) async throws -> [NamedRange] {
+		try await withCheckedThrowingContinuation { continuation in
+			self.executeHighlightsQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { result in
+				continuation.resume(with: result)
+			}
+		}
+	}
+
 	/// Execute a standard injections.scm query
 	///
-	/// Note that some injection query definitions require evaluating the text content, which is only possible by supplying a `textProvider`.
+	/// Note that some query definitions require evaluating the text content, which is only possible by supplying a `textProvider`.
 	public func executeInjectionsQuery(_ query: Query,
 									   in range: NSRange,
 									   of layer: TreeSitterParseLayer,
@@ -509,15 +545,15 @@ extension TreeSitterClient {
 									   textProvider: TextProvider? = nil,
 									   completionHandler: @escaping (Result<[NamedRange], TreeSitterClientError>) -> Void) {
 		executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
-			let result = cursorResult.map({ cursor in
-				cursor.compactMap({ $0.injection(with: textProvider) })
-			})
+			let result = cursorResult.map { $0.injections() }
 
 			completionHandler(result)
 		}
 	}
 
 	/// Execute a standard injections.scm query
+	///
+	/// Note that some query definitions require evaluating the text content, which is only possible by supplying a `textProvider`.
 	@available(macOS 10.15, iOS 13.0, watchOS 6.0.0, tvOS 13.0.0, *)
 	@MainActor
 	public func injections(with query: Query,
