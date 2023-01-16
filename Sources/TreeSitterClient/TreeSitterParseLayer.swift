@@ -76,7 +76,7 @@ public struct TreeSitterParseLayer {
 
 	mutating func parse(readHandler: @escaping Parser.ReadBlock, forceReparse: Bool = false) -> TreeSitterParseLayer {
 		var newState = self.copy()
-		newState.trees = []
+		var newTrees: [Tree] = []
 
 		let waitingGroup = DispatchGroup()
 		waitingGroup.enter()
@@ -85,19 +85,21 @@ public struct TreeSitterParseLayer {
 			self.parser.includedRanges = self.rangesToParse
 		}
 
-		if forceReparse || self.trees.count == 0 {
+		if forceReparse || newState.trees.count == 0 {
 			if let updatedTree = self.parser.parse(tree: nil, readBlock: readHandler) {
-				newState.trees.append(updatedTree)
+				newTrees.append(updatedTree)
 			}
 		}
 		else {
 			for tree in self.trees {
 				if let updatedTree = self.parser.parse(tree: tree, readBlock: readHandler) {
-					newState.trees.append(updatedTree)
+					newTrees.append(updatedTree)
 				}
 			}
 		}
 
+		newState.trees = newTrees
+		
 		// Always run a new injections query on the freshly updated tree, obtaining an up-to-date
 		// list of the injected blocks we are tracking
 		// TODO: Can we limit the injection search here to only areas that changed? For now just reparse always
