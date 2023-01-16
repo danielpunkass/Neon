@@ -509,10 +509,11 @@ extension TreeSitterClient {
 	/// Note that some query definitions require evaluating the text content, which is only possible by supplying a `textProvider`.
 	public func executeHighlightsQuery(_ query: Query,
 									   in range: NSRange,
+									   of layer: TreeSitterParseLayer,
 									   executionMode: ExecutionMode = .asynchronous(prefetch: true),
 									   textProvider: TextProvider? = nil,
 									   completionHandler: @escaping (Result<[NamedRange], TreeSitterClientError>) -> Void) {
-		executeResolvingQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+		executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
 			let result = cursorResult.map { $0.highlights() }
 
 			completionHandler(result)
@@ -526,10 +527,11 @@ extension TreeSitterClient {
 	@MainActor
 	public func highlights(with query: Query,
 						   in range: NSRange,
+						   of layer: TreeSitterParseLayer,
 						   executionMode: ExecutionMode = .asynchronous(prefetch: true),
 						   textProvider: TextProvider? = nil) async throws -> [NamedRange] {
 		try await withCheckedThrowingContinuation { continuation in
-			self.executeHighlightsQuery(query, in: range, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeHighlightsQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { result in
 				continuation.resume(with: result)
 			}
 		}
