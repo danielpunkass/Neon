@@ -74,7 +74,7 @@ public final class TreeSitterClient {
 	public init(baseLanguage: LanguageSpecifier, injectedLanguages: [String:LanguageSpecifier] = [:], transformer: Point.LocationTransformer? = nil, synchronousLengthThreshold: Int = 1024) throws {
 		self.baseLanguage = baseLanguage
 		self.injectedLanguages = injectedLanguages
-		self.baseLayer = try TreeSitterParseLayer(text: "", baseLanguage: baseLanguage, injectedLanguages: injectedLanguages)
+		self.baseLayer = try TreeSitterParseLayer(baseLanguage: baseLanguage, injectedLanguages: injectedLanguages)
         self.outstandingEdits = []
         self.computeInvalidations = true
         self.version = 0

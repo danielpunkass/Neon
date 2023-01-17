@@ -21,7 +21,6 @@ public struct TreeSitterParseLayer {
 
 	// A parse layer represents a parser for a specific language, and all the
 	// native TreeSitter trees that resulted from parsing at that layer with that language.
-	public let text: String
 	public var rangesToParse: [TSRange]
 	public let baseLanguage: LanguageSpecifier
 
@@ -47,9 +46,8 @@ public struct TreeSitterParseLayer {
 	// are grouped within the same parser "layer".
 	public var subLayers: [String:TreeSitterParseLayer]
 
-	init(text: String, baseLanguage: LanguageSpecifier, injectedLanguages: [String:LanguageSpecifier]) throws {
-		self.text = text
-		self.rangesToParse = [] // if empty, parse whole text
+	init(baseLanguage: LanguageSpecifier, injectedLanguages: [String:LanguageSpecifier]) throws {
+		self.rangesToParse = [] // if empty, parse all
 		self.baseLanguage = baseLanguage
 		self.injectedLanguages = injectedLanguages
         self.parser = Parser()
@@ -114,7 +112,7 @@ public struct TreeSitterParseLayer {
 							if let injectedLanguage = newState.injectedLanguages[languageName] {
 								var existingLayer = newState.subLayers[languageName]
 								if existingLayer == nil {
-									guard let addedLayer = try? TreeSitterParseLayer(text: self.text, baseLanguage: injectedLanguage, injectedLanguages: self.injectedLanguages) else {
+									guard let addedLayer = try? TreeSitterParseLayer(baseLanguage: injectedLanguage, injectedLanguages: self.injectedLanguages) else {
 										continue
 									}
 									existingLayer = addedLayer
@@ -181,7 +179,7 @@ public struct TreeSitterParseLayer {
     }
 
     func copy() -> TreeSitterParseLayer {
-		var copyLayer = try! TreeSitterParseLayer(text: self.text, baseLanguage: self.baseLanguage, injectedLanguages: self.injectedLanguages)
+		var copyLayer = try! TreeSitterParseLayer(baseLanguage: self.baseLanguage, injectedLanguages: self.injectedLanguages)
 		copyLayer.trees = self.trees.compactMap { $0.copy() }
 		for (languageName, layer) in self.subLayers {
 			copyLayer.subLayers[languageName] = layer.copy()
