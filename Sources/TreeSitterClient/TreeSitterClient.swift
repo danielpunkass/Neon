@@ -189,7 +189,7 @@ extension TreeSitterClient {
 		self.baseLayer.applyEdit(edit.inputEdit)
 
 		// Workaround a tree corruption bug that happens with complex edits
-		let forceReparse = (edit.inputEdit.newEndByte - edit.inputEdit.startByte) > 2
+		let forceReparse = false
 		self.baseLayer = self.baseLayer.parse(readHandler: readHandler, forceReparse: forceReparse)
 
 		let newState = self.baseLayer.copy()
