@@ -99,7 +99,7 @@ extension TreeSitterClient {
 				return
 			}
 
-			self.executeHighlightsQuery(query, in: range, of: self.baseLayer, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeHighlightsQuery(query, in: range, of: self.baseLayer, executionMode: executionMode, textProvider: textProvider) { (result: Result<[Token], TreeSitterClientError>) in
 				let tokenApp = result
 					.map({ TokenApplication(tokens: $0) })
 					.mapError({ $0 as Error })
