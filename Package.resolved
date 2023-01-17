@@ -12,7 +12,7 @@
       },
       {
         "package": "SwiftTreeSitter",
-        "repositoryURL": "https://github.com/ChimeHQ/SwiftTreeSitter",
+        "repositoryURL": "https://github.com/danielpunkass/SwiftTreeSitter",
         "state": {
           "branch": null,
           "revision": "6d1ed46a10daadb6adaabbff0a898c4789161a4c",
