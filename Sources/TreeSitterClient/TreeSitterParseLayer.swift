@@ -69,22 +69,24 @@ public struct TreeSitterParseLayer {
 		self.subLayers = [:]
     }
 
-	#warning("not used - still need?")
-//	func tree(in range: Range<UInt32>) -> Tree? {
-//		return self.trees.first { tree in
-//			guard let node = tree.rootNode else { return false }
-//			let thisRange = node.range
-//			return NSLocationInRange(Int(range.lowerBound), thisRange) && NSLocationInRange(Int(range.upperBound), thisRange)
-//		}
-//	}
-//
-//    func node(in range: Range<UInt32>) -> Node? {
-//		guard let tree = tree(in: range), let root = tree.rootNode else {
-//            return nil
-//        }
-//
-//        return root.descendant(in: range)
-//    }
+	// These are not used for now but could be handy in optimizing things. I think though we may need to
+	// consider the case where more than one tree correlates with a given range. For example if the document's whole
+	// range is given ... should we change this to `trees..`?
+	func tree(in range: Range<UInt32>) -> Tree? {
+		return self.trees.first { tree in
+			guard let node = tree.rootNode else { return false }
+			let thisRange = node.range
+			return NSLocationInRange(Int(range.lowerBound), thisRange) && NSLocationInRange(Int(range.upperBound), thisRange)
+		}
+	}
+
+    func node(in range: Range<UInt32>) -> Node? {
+		guard let tree = tree(in: range), let root = tree.rootNode else {
+            return nil
+        }
+
+        return root.descendant(in: range)
+    }
 
 	mutating func parse(readHandler: @escaping Parser.ReadBlock, forceReparse: Bool = false) -> TreeSitterParseLayer {
 		var newState = self.copy()
@@ -104,7 +106,6 @@ public struct TreeSitterParseLayer {
 		else {
 			let useOldTrees = forceReparse ? false : self.trees.count == self.rangesToParse.count
 			for (index, range) in rangesToParse.enumerated() {
-				#warning("Should determine old tree based on range?")
 				let oldTree = useOldTrees ? self.trees[index] : nil
 				self.parser.includedRanges = [range]
 				if let updatedTree = self.parser.parse(tree: oldTree, readBlock: readHandler) {
@@ -131,7 +132,7 @@ public struct TreeSitterParseLayer {
 							if let injectedLanguage = newState.injectedLanguages[languageName] {
 								var existingLayer = newState.subLayers[languageName]
 								if existingLayer == nil {
-									guard var addedLayer = try? TreeSitterParseLayer(baseLanguage: injectedLanguage, injectedLanguages: self.injectedLanguages) else {
+									guard let addedLayer = try? TreeSitterParseLayer(baseLanguage: injectedLanguage, injectedLanguages: self.injectedLanguages) else {
 										continue
 									}
 									existingLayer = addedLayer

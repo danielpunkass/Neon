@@ -347,7 +347,6 @@ extension TreeSitterClient {
                                                                                  in: range,
 																				 of: layerCopy,
 																				 with: tree)
-				#warning("Need to make sure that highlighting queries also coalesce all subtrees - should be with: tree variants like we did in TreeSitterParseLayer... or move all this to there finally?")
                 if case .success(let cursor) = result, prefetchMatches {
                     cursor.prefetchMatches()
                 }
