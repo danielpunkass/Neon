@@ -15,12 +15,7 @@ let package = Package(
 	targets: [
 		.target(name: "Neon", dependencies: ["SwiftTreeSitter", "Rearrange", "TreeSitterClient"]),
 		.target(name: "TreeSitterClient", dependencies: ["Rearrange", "SwiftTreeSitter"]),
-		.target(name: "TestTreeSitterSwift",
-				path: "tree-sitter-swift",
-				sources: ["src/parser.c", "src/scanner.c"],
-				publicHeadersPath: "bindings/swift",
-				cSettings: [.headerSearchPath("src")]),
 		.testTarget(name: "NeonTests", dependencies: ["Neon"]),
-		.testTarget(name: "TreeSitterClientTests", dependencies: ["TreeSitterClient", "TestTreeSitterSwift"])
+		.testTarget(name: "TreeSitterClientTests", dependencies: ["TreeSitterClient"])
 	]
 )

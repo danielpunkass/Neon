@@ -18,10 +18,11 @@ extension TreeSitterClient {
     public func executeHighlightsQuery(_ query: Query,
                                        in range: NSRange,
 									   of layer: TreeSitterParseLayer,
+									   with tree: Tree,
                                        executionMode: ExecutionMode = .asynchronous(prefetch: true),
                                        textProvider: TextProvider? = nil,
                                        completionHandler: @escaping (Result<[Token], TreeSitterClientError>) -> Void) {
-		executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+		executeResolvingQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { cursorResult in
             let result = cursorResult.map({ self.tokensFromCursor($0) })
 
             completionHandler(result)
@@ -33,10 +34,11 @@ extension TreeSitterClient {
     public func highlights(with query: Query,
                            in range: NSRange,
 						   of layer: TreeSitterParseLayer,
+						   with tree: Tree,
                            executionMode: ExecutionMode = .asynchronous(prefetch: true),
                            textProvider: TextProvider? = nil) async throws -> [Token] {
         try await withCheckedThrowingContinuation { continuation in
-			self.executeHighlightsQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeHighlightsQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { result in
                 continuation.resume(with: result)
             }
         }
@@ -66,15 +68,18 @@ extension TreeSitterClient {
 		// Invokes a query for the given layer and recurses on any subLayers
 		func requestTokens(for layer: TreeSitterParseLayer) {
 			if let query = layer.baseLanguage.highlightingQuery {
-				waitingGroup.enter()
-				executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
-					switch cursorResult.map({ self.tokensFromCursor($0) }) {
-						case .success(let layerTokens):
-							tokens.append(contentsOf: layerTokens)
-						case .failure(let layerError):
-							error = layerError
+				for tree in layer.trees {
+					waitingGroup.enter()
+					
+					executeResolvingQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+						switch cursorResult.map({ self.tokensFromCursor($0) }) {
+							case .success(let treeTokens):
+								tokens.append(contentsOf: treeTokens)
+							case .failure(let layerError):
+								error = layerError
+						}
+						waitingGroup.leave()
 					}
-					waitingGroup.leave()
 				}
 			}
 
@@ -99,7 +104,7 @@ extension TreeSitterClient {
 				return
 			}
 
-			self.executeHighlightsQuery(query, in: range, of: self.baseLayer, executionMode: executionMode, textProvider: textProvider) { (result: Result<[Token], TreeSitterClientError>) in
+			self.executeHighlightsQuery(query, in: range, of: self.baseLayer, with: self.baseLayer.trees.first!, executionMode: executionMode, textProvider: textProvider) { (result: Result<[Token], TreeSitterClientError>) in
 				let tokenApp = result
 					.map({ TokenApplication(tokens: $0) })
 					.mapError({ $0 as Error })

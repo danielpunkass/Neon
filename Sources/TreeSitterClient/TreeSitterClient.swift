@@ -296,6 +296,7 @@ extension TreeSitterClient {
     public func executeResolvingQuery(_ query: Query,
                                       in range: NSRange,
 									  of layer: TreeSitterParseLayer,
+									  with tree: Tree,
                                       executionMode: ExecutionMode = .asynchronous(prefetch: true),
 									  textProvider: TextProvider? = nil,
                                       completionHandler: @escaping (ResolvingQueryCursorResult) -> Void) {
@@ -305,21 +306,21 @@ extension TreeSitterClient {
 
         switch executionMode {
         case .synchronous:
-				let result = executeResolvingQuerySynchronously(query, in: range, of: layer, textProvider: textProvider)
+				let result = executeResolvingQuerySynchronously(query, in: range, of: layer, with: tree, textProvider: textProvider)
             completionHandler(result)
             return
         case .failIfAsynchronous:
             if canAttemptSynchronousQuery(in: range) == false {
                 completionHandler(.failure(.asynchronousExecutionRequired))
             } else {
-                let result = executeResolvingQuerySynchronously(query, in: range, of: layer, textProvider: textProvider)
+                let result = executeResolvingQuerySynchronously(query, in: range, of: layer, with: tree, textProvider: textProvider)
                 completionHandler(result)
             }
 
             return
         case .synchronousPreferred:
             if canAttemptSynchronousQuery(in: range) {
-                let result = executeResolvingQuerySynchronously(query, in: range, of: layer, textProvider: textProvider)
+                let result = executeResolvingQuerySynchronously(query, in: range, of: layer, with: tree, textProvider: textProvider)
                 completionHandler(result)
                 return
             }
@@ -344,8 +345,9 @@ extension TreeSitterClient {
             DispatchQueue.global().async {
                 let result = self.executeResolvingQuerySynchronouslyWithoutCheck(query,
                                                                                  in: range,
-																				 of: layerCopy)
-
+																				 of: layerCopy,
+																				 with: tree)
+				#warning("Need to make sure that highlighting queries also coalesce all subtrees - should be with: tree variants like we did in TreeSitterParseLayer... or move all this to there finally?")
                 if case .success(let cursor) = result, prefetchMatches {
                     cursor.prefetchMatches()
                 }
@@ -375,10 +377,11 @@ extension TreeSitterClient {
     public func resolvingQueryCursor(with query: Query,
                                      in range: NSRange,
 									 of layer: TreeSitterParseLayer,
+									 with tree: Tree,
                                      executionMode: ExecutionMode = .asynchronous(prefetch: true),
 									 textProvider: TextProvider? = nil) async throws -> ResolvingQueryCursor {
         try await withCheckedThrowingContinuation { continuation in
-			self.executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeResolvingQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { result in
                 continuation.resume(with: result)
             }
         }
@@ -423,7 +426,7 @@ extension TreeSitterClient {
 					completionHandler(.failure(.staleContent))
 					return
 				}
-				if let tree = state.tree {
+				if let tree = state.trees.first {
 					completionHandler(.success(tree))
 				} else {
 					completionHandler(.failure(.stateInvalid))
@@ -456,14 +459,14 @@ extension TreeSitterClient {
 	/// - Parameter query: the query to execute
 	/// - Parameter range: constrain the query to this range
 	/// - Parameter textProvider: the ResolvingQueryCursor.TextProvider used for predicate resolution
-	public func executeResolvingQuerySynchronously(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer, textProvider: TextProvider? = nil) -> ResolvingQueryCursorResult {
+	public func executeResolvingQuerySynchronously(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer, with tree: Tree, textProvider: TextProvider? = nil) -> ResolvingQueryCursorResult {
         preconditionOnMainQueue()
 
         if hasQueuedWork {
             return .failure(.staleState)
         }
 
-        let result = executeResolvingQuerySynchronouslyWithoutCheck(query, in: range, of: layer)
+        let result = executeResolvingQuerySynchronouslyWithoutCheck(query, in: range, of: layer, with: tree)
 
 		if let textProvider = textProvider, let cursor = try? result.get() {
 			cursor.prepare(with: textProvider)
@@ -472,30 +475,30 @@ extension TreeSitterClient {
 		return result
     }
 
-    private func executeResolvingQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer) -> ResolvingQueryCursorResult {
-        return executeQuerySynchronouslyWithoutCheck(query, in: range, of: layer)
+	private func executeResolvingQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer, with tree: Tree) -> ResolvingQueryCursorResult {
+        return executeQuerySynchronouslyWithoutCheck(query, in: range, of: layer, with: tree)
             .map({ ResolvingQueryCursor(cursor: $0) })
     }
 }
 
 extension TreeSitterClient {
-	public func executeQuerySynchronously(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer) -> QueryCursorResult {
+	public func executeQuerySynchronously(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer, with tree: Tree) -> QueryCursorResult {
         preconditionOnMainQueue()
 
         if hasQueuedWork {
             return .failure(.staleState)
         }
 
-        return executeQuerySynchronouslyWithoutCheck(query, in: range, of: layer)
+        return executeQuerySynchronouslyWithoutCheck(query, in: range, of: layer, with: tree)
     }
 
-    private func executeQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer) -> QueryCursorResult {
-        guard let node = layer.tree?.rootNode else {
+    private func executeQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange, of layer: TreeSitterParseLayer, with tree: Tree) -> QueryCursorResult {
+        guard let node = tree.rootNode else {
             return .failure(.stateInvalid)
         }
 
         // critical to keep a reference to the tree, so it survives as long as the query
-        let cursor = query.execute(node: node, in: layer.tree)
+        let cursor = query.execute(node: node, in: tree)
 
         cursor.setRange(range)
 
@@ -510,10 +513,11 @@ extension TreeSitterClient {
 	public func executeHighlightsQuery(_ query: Query,
 									   in range: NSRange,
 									   of layer: TreeSitterParseLayer,
+									   with tree: Tree,
 									   executionMode: ExecutionMode = .asynchronous(prefetch: true),
 									   textProvider: TextProvider? = nil,
 									   completionHandler: @escaping (Result<[NamedRange], TreeSitterClientError>) -> Void) {
-		executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+		executeResolvingQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { cursorResult in
 			let result = cursorResult.map { $0.highlights() }
 
 			completionHandler(result)
@@ -528,10 +532,11 @@ extension TreeSitterClient {
 	public func highlights(with query: Query,
 						   in range: NSRange,
 						   of layer: TreeSitterParseLayer,
+						   with tree: Tree,
 						   executionMode: ExecutionMode = .asynchronous(prefetch: true),
 						   textProvider: TextProvider? = nil) async throws -> [NamedRange] {
 		try await withCheckedThrowingContinuation { continuation in
-			self.executeHighlightsQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeHighlightsQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { result in
 				continuation.resume(with: result)
 			}
 		}
@@ -543,10 +548,11 @@ extension TreeSitterClient {
 	public func executeInjectionsQuery(_ query: Query,
 									   in range: NSRange,
 									   of layer: TreeSitterParseLayer,
+									   with tree: Tree,
 									   executionMode: ExecutionMode = .asynchronous(prefetch: true),
 									   textProvider: TextProvider? = nil,
 									   completionHandler: @escaping (Result<[NamedRange], TreeSitterClientError>) -> Void) {
-		executeResolvingQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { cursorResult in
+		executeResolvingQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { cursorResult in
 			let result = cursorResult.map { $0.injections() }
 
 			completionHandler(result)
@@ -561,10 +567,11 @@ extension TreeSitterClient {
 	public func injections(with query: Query,
 						   in range: NSRange,
 						   of layer: TreeSitterParseLayer,
+						   with tree: Tree,
 						   executionMode: ExecutionMode = .asynchronous(prefetch: true),
 						   textProvider: TextProvider? = nil) async throws -> [NamedRange] {
 		try await withCheckedThrowingContinuation { continuation in
-			self.executeInjectionsQuery(query, in: range, of: layer, executionMode: executionMode, textProvider: textProvider) { result in
+			self.executeInjectionsQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { result in
 				continuation.resume(with: result)
 			}
 		}

@@ -17,12 +17,24 @@ import SwiftTreeSitter
 //		- Only parse injections for changed subset of tree?
 //
 
+/// A language layer represents 1 or more trees parsed by a particular language. Typically
+/// the base layer for any parsing scenario will contain just one tree, representing the high-level
+/// parsing of the whole document. Sub-layers are created for any injections at that particular
+/// level of the injection hierarchy. For example an HTML document with two distinct <script>
+/// nodes and one embedded <style> declaration might (assuming the language support is
+/// provided by the client) result in a one base layer representing HTML, with one tree, one
+/// sublayer representing JavaScript, with two trees, and one sublayer representing CSS, with
+/// one tree.
+
 public struct TreeSitterParseLayer {
 
-	// A parse layer represents a parser for a specific language, and all the
-	// native TreeSitter trees that resulted from parsing at that layer with that language.
-	public var rangesToParse: [TSRange]
 	public let baseLanguage: LanguageSpecifier
+
+	public var rangesToParse: [TSRange]
+
+	// If true, parse a single tree based on all the ranges. If false,
+	// parse a separate tree for each distinct range.
+	public var combineRanges = false
 
 	// Injected languages are represented by a name as it is expected
 	// to be identified from the name of an injection query result,
@@ -37,7 +49,8 @@ public struct TreeSitterParseLayer {
 	// by the presence or absence of an "injection.combined" attribute on the injection.
 	public var trees: [Tree]
 
-	// #warning("temporary workaround")
+	// As we move towards supporting multiple trees, there are still code paths that rely upon
+	// defaulting to the "main tree", so just return the first one.
 	var tree: Tree? { return trees.first }
 
 	// Sublayers are created for each of the separate injected languages that are discovered
@@ -56,21 +69,22 @@ public struct TreeSitterParseLayer {
 		self.subLayers = [:]
     }
 
-	func tree(in range: Range<UInt32>) -> Tree? {
-		return self.trees.first { tree in
-			guard let node = tree.rootNode else { return false }
-			let thisRange = node.range
-			return NSLocationInRange(Int(range.lowerBound), thisRange) && NSLocationInRange(Int(range.upperBound), thisRange)
-		}
-	}
-
-    func node(in range: Range<UInt32>) -> Node? {
-		guard let tree = tree(in: range), let root = tree.rootNode else {
-            return nil
-        }
-
-        return root.descendant(in: range)
-    }
+	#warning("not used - still need?")
+//	func tree(in range: Range<UInt32>) -> Tree? {
+//		return self.trees.first { tree in
+//			guard let node = tree.rootNode else { return false }
+//			let thisRange = node.range
+//			return NSLocationInRange(Int(range.lowerBound), thisRange) && NSLocationInRange(Int(range.upperBound), thisRange)
+//		}
+//	}
+//
+//    func node(in range: Range<UInt32>) -> Node? {
+//		guard let tree = tree(in: range), let root = tree.rootNode else {
+//            return nil
+//        }
+//
+//        return root.descendant(in: range)
+//    }
 
 	mutating func parse(readHandler: @escaping Parser.ReadBlock, forceReparse: Bool = false) -> TreeSitterParseLayer {
 		var newState = self.copy()
@@ -79,31 +93,36 @@ public struct TreeSitterParseLayer {
 		let waitingGroup = DispatchGroup()
 		waitingGroup.enter()
 
-		if self.rangesToParse.count > 0 {
+		let parseOneTree = self.combineRanges || self.rangesToParse.count <= 1
+		if parseOneTree {
+			let oldTree = forceReparse ? nil : self.trees.first
 			self.parser.includedRanges = self.rangesToParse
-		}
-
-		if forceReparse || newState.trees.count == 0 {
-			if let updatedTree = self.parser.parse(tree: nil, readBlock: readHandler) {
+			if let updatedTree = self.parser.parse(tree: oldTree, readBlock: readHandler) {
 				newTrees.append(updatedTree)
 			}
 		}
 		else {
-			for tree in self.trees {
-				if let updatedTree = self.parser.parse(tree: tree, readBlock: readHandler) {
+			let useOldTrees = forceReparse ? false : self.trees.count == self.rangesToParse.count
+			for (index, range) in rangesToParse.enumerated() {
+				#warning("Should determine old tree based on range?")
+				let oldTree = useOldTrees ? self.trees[index] : nil
+				self.parser.includedRanges = [range]
+				if let updatedTree = self.parser.parse(tree: oldTree, readBlock: readHandler) {
 					newTrees.append(updatedTree)
 				}
 			}
 		}
 
 		newState.trees = newTrees
-		
-		// Always run a new injections query on the freshly updated tree, obtaining an up-to-date
+
+		// Always run a new injections query on the freshly updated trees, obtaining an up-to-date
 		// list of the injected blocks we are tracking
 		// TODO: Can we limit the injection search here to only areas that changed? For now just reparse always
 		newState.subLayers = [:]
 		if let injectionQuery = self.baseLanguage.injectionQuery {
 			waitingGroup.enter()
+			// TODO: Should determine when capturing injection points whether the
+			// combineRanges property should be set on the pertinent parse layer.
 			newState.executeInjectionsQuery(injectionQuery) { result in
 				switch result {
 					case .success(let blocks):
@@ -112,11 +131,16 @@ public struct TreeSitterParseLayer {
 							if let injectedLanguage = newState.injectedLanguages[languageName] {
 								var existingLayer = newState.subLayers[languageName]
 								if existingLayer == nil {
-									guard let addedLayer = try? TreeSitterParseLayer(baseLanguage: injectedLanguage, injectedLanguages: self.injectedLanguages) else {
+									guard var addedLayer = try? TreeSitterParseLayer(baseLanguage: injectedLanguage, injectedLanguages: self.injectedLanguages) else {
 										continue
 									}
 									existingLayer = addedLayer
 									newState.subLayers[languageName] = addedLayer
+
+									// Special case - force HTML to parse as a single document
+									if languageName == "html" {
+										newState.subLayers[languageName]?.combineRanges = true
+									}
 								}
 								newState.subLayers[languageName]!.rangesToParse.append(block.tsRange)
 							}
@@ -129,15 +153,15 @@ public struct TreeSitterParseLayer {
 			}
 		}
 
+		waitingGroup.leave()
+		waitingGroup.wait()
+
 		// Recursively parse any sublayers
 		let oldSubLayers = newState.subLayers
 		newState.subLayers = [:]
 		for (language, var subLayer) in oldSubLayers {
 			newState.subLayers[language] = subLayer.parse(readHandler: readHandler)
 		}
-
-		waitingGroup.leave()
-		waitingGroup.wait()
 
 		return newState
 	}
@@ -180,6 +204,7 @@ public struct TreeSitterParseLayer {
 
     func copy() -> TreeSitterParseLayer {
 		var copyLayer = try! TreeSitterParseLayer(baseLanguage: self.baseLanguage, injectedLanguages: self.injectedLanguages)
+		copyLayer.rangesToParse = self.rangesToParse
 		copyLayer.trees = self.trees.compactMap { $0.copy() }
 		for (languageName, layer) in self.subLayers {
 			copyLayer.subLayers[languageName] = layer.copy()
@@ -188,18 +213,19 @@ public struct TreeSitterParseLayer {
     }
 }
 
-// Injection support - this is redundant with code in TreeSitterClient but I want to get things working
+// Query support - this is redundant with code in TreeSitterClient but I want to get things working
 // before the teardown/buildup that might be required to, for example, possibly move all the query fundamentals into
 // TreeSitterParseLayer.
+
 extension TreeSitterParseLayer {
 
-	private func executeQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange? = nil, with state: TreeSitterParseLayer) -> Result<QueryCursor, TreeSitterClientError> {
-		guard let node = state.tree?.rootNode else {
+	private func executeQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange? = nil, with tree: Tree) -> Result<QueryCursor, TreeSitterClientError> {
+		guard let node = tree.rootNode else {
 			return .failure(TreeSitterClientError.stateInvalid)
 		}
 
 		// critical to keep a reference to the tree, so it survives as long as the query
-		let cursor = query.execute(node: node, in: state.tree)
+		let cursor = query.execute(node: node, in: tree)
 
 		if let range = range {
 			cursor.setRange(range)
@@ -208,8 +234,8 @@ extension TreeSitterParseLayer {
 		return .success(cursor)
 	}
 
-	private func executeResolvingQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange? = nil, with state: TreeSitterParseLayer) -> Result<ResolvingQueryCursor, TreeSitterClientError> {
-		return executeQuerySynchronouslyWithoutCheck(query, in: range, with: state)
+	private func executeResolvingQuerySynchronouslyWithoutCheck(_ query: Query, in range: NSRange? = nil, with tree: Tree) -> Result<ResolvingQueryCursor, TreeSitterClientError> {
+		return executeQuerySynchronouslyWithoutCheck(query, in: range, with: tree)
 			.map({ ResolvingQueryCursor(cursor: $0) })
 	}
 
@@ -219,12 +245,29 @@ extension TreeSitterParseLayer {
 	public func executeInjectionsQuery(_ query: Query,
 									   in range: NSRange? = nil,
 									   completionHandler: (Result<[NamedRange], TreeSitterClientError>) -> Void) {
-		let cursorResult = executeResolvingQuerySynchronouslyWithoutCheck(query, in: range, with: self)
-		let result = cursorResult.map({ cursor in
-			cursor.compactMap({ $0.injection(with: nil) })
-		})
+		var injectionRanges: [NamedRange] = []
 
-			completionHandler(result)
+		let waitingGroup = DispatchGroup()
+		waitingGroup.enter()
+
+		for tree in self.trees {
+			let cursorResult = executeResolvingQuerySynchronouslyWithoutCheck(query, in: range, with: tree)
+			let result = cursorResult.map({ cursor in
+				cursor.compactMap({ $0.injection(with: nil) })
+			})
+			switch result {
+				case .success(let blocks):
+					injectionRanges.append(contentsOf: blocks)
+				case .failure(_):
+					// Just ignore failures since we're hoping to get as much as we can from as many trees as possible
+					continue
+			}
+		}
+
+		waitingGroup.leave()
+		waitingGroup.wait()
+
+		completionHandler(Result.success(injectionRanges))
 	}
 
 }
