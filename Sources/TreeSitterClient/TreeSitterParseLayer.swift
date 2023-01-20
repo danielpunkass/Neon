@@ -118,7 +118,7 @@ public struct TreeSitterParseLayer {
 
 		// Always run a new injections query on the freshly updated trees, obtaining an up-to-date
 		// list of the injected blocks we are tracking
-		// TODO: Can we limit the injection search here to only areas that changed? For now just reparse always
+		// TODO: Can we limit the injection search here to only subLayers with areas that changed? For now just reparse always
 		newState.subLayers = [:]
 		if let injectionQuery = self.baseLanguage.injectionQuery {
 			waitingGroup.enter()
@@ -164,8 +164,28 @@ public struct TreeSitterParseLayer {
 			newState.subLayers[language] = subLayer.parse(readHandler: readHandler)
 		}
 
+		// Set to DEBUG to print debug info about the parse tree
+#if false
+		print("After parsing:\n\(newState.debugDescription())")
+#endif
 		return newState
 	}
+
+#if DEBUG
+	func debugDescription(_ indentString: String = "") -> String {
+		var description = "\n\(indentString)LAYER:\n"
+		let nextIndentString = indentString + "  "
+		for tree in self.trees {
+			let treeString = tree.rootNode?.sExpressionString ?? "NULL"
+			description.append("\(nextIndentString)TREE: \(treeString)\n")
+		}
+
+		for layer in self.subLayers.values {
+			description.append("\(nextIndentString)\(layer.debugDescription(nextIndentString))")
+		}
+		return description
+	}
+#endif
 
 	func applyEdit(_ edit: InputEdit, layer: TreeSitterParseLayer? = nil) {
 		let targetLayer = layer ?? self
