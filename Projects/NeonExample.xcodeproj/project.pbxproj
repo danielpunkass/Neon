@@ -250,7 +250,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C9E076022BB30503005ED81E /* NeonExample.xcconfig */;
 			buildSettings = {
-				DEVELOPMENT_TEAM = 5GXRS83U4Z;
+				DEVELOPMENT_TEAM = J79Y4KWZQ2;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -261,6 +261,7 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jalkut.neonsample;
 				TVOS_DEPLOYMENT_TARGET = 16.0;
 				WATCHOS_DEPLOYMENT_TARGET = 9.0;
 			};
@@ -270,7 +271,7 @@
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = C9E076022BB30503005ED81E /* NeonExample.xcconfig */;
 			buildSettings = {
-				DEVELOPMENT_TEAM = 5GXRS83U4Z;
+				DEVELOPMENT_TEAM = J79Y4KWZQ2;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -281,6 +282,7 @@
 				"INFOPLIST_KEY_UIStatusBarStyle[sdk=iphonesimulator*]" = UIStatusBarStyleDefault;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.jalkut.neonsample;
 				TVOS_DEPLOYMENT_TARGET = 16.0;
 				WATCHOS_DEPLOYMENT_TARGET = 9.0;
 			};

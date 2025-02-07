@@ -70,7 +70,7 @@ final class TextViewController: NSUIViewController {
 		)
 
 		let highlighterConfig = TextViewHighlighter.Configuration(
-			languageConfiguration: swiftConfig, // the root language
+			languageConfiguration: markdownConfig, // the root language
 			attributeProvider: provider,
 			languageProvider: { name in
 				print("embedded language: ", name)
