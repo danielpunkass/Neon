@@ -9,7 +9,7 @@ let package = Package(
 		.library(name: "Neon", targets: ["Neon"]),
 	],
 	dependencies: [
-        .package(url: "https://github.com/danielpunkass/SwiftTreeSitter", revision: "7260abc17ca52cc432f3731974cdcf4b1fdb2223"),
+        .package(url: "https://github.com/danielpunkass/SwiftTreeSitter", revision: "marsedit"),
 		.package(url: "https://github.com/ChimeHQ/Rearrange", from: "1.5.3"),
 	],
 	targets: [
