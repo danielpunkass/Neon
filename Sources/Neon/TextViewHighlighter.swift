@@ -1,111 +1,200 @@
 import Foundation
+
+import RangeState
 import TreeSitterClient
 import SwiftTreeSitter
+import SwiftTreeSitterLayer
 
-#if os(macOS)
+#if os(macOS) && !targetEnvironment(macCatalyst)
 import AppKit
-
-@available(macOS 11.0, *)
-public typealias TextStorageEditActions = NSTextStorageEditActions
-#elseif os(iOS)
+#elseif os(iOS) || os(visionOS)
 import UIKit
-
-@available(iOS 15.0, tvOS 15.0, *)
-public typealias TextStorageEditActions = NSTextStorage.EditActions
 #endif
 
+#if os(macOS) || os(iOS) || os(visionOS)
 public enum TextViewHighlighterError: Error {
 	case noTextStorage
 }
 
-#if os(macOS) || os(iOS)
+extension TextView {
+#if os(macOS) && !targetEnvironment(macCatalyst)
+	func getTextStorage() throws -> NSTextStorage {
+		guard let storage = textStorage else {
+			throw TextViewHighlighterError.noTextStorage
+		}
+
+		return storage
+	}
+#else
+	func getTextStorage() throws -> NSTextStorage {
+		textStorage
+	}
+#endif
+}
+
 /// A class that can connect `NSTextView`/`UITextView` to `TreeSitterClient`
 ///
-/// This class is a minimal implemenation that can help perform highlighting
-/// for a TextView. The created instance will become the delegate of the
-/// view's `NSTextStorage`.
-@available(macOS 11.0, iOS 15.0, tvOS 15.0, *)
-public final class TextViewHighlighter: NSObject {
+/// This class is a minimal implementation that can help perform highlighting for a TextView. It is compatible with both TextKit 1 and 2 views, and uses single-phase pass with tree-sitter. The created instance will become the delegate of the view's `NSTextStorage`.
+@available(macOS 13.0, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+@MainActor
+public final class TextViewHighlighter {
+	private typealias Styler = TextSystemStyler<TextViewSystemInterface>
+
+	public struct Configuration {
+		public let languageConfiguration: LanguageConfiguration
+		public let attributeProvider: TokenAttributeProvider
+		public let languageProvider: LanguageLayer.LanguageProvider
+		public let locationTransformer: Point.LocationTransformer
+
+		public init(
+			languageConfiguration: LanguageConfiguration,
+			attributeProvider: @escaping TokenAttributeProvider,
+			languageProvider: @escaping LanguageLayer.LanguageProvider = { _ in nil },
+			locationTransformer: @escaping Point.LocationTransformer
+		) {
+			self.languageConfiguration = languageConfiguration
+			self.attributeProvider = attributeProvider
+			self.languageProvider = languageProvider
+			self.locationTransformer = locationTransformer
+		}
+	}
+
 	public let textView: TextView
-	private let highlighter: Highlighter
-	private let treeSitterClient: TreeSitterClient
 
-	public init(textView: TextView, client: TreeSitterClient, highlightQuery: Query, attributeProvider: @escaping TextViewSystemInterface.AttributeProvider) throws {
-		self.treeSitterClient = client
+	private let configuration: Configuration
+	private let styler: Styler
+	private let interface: TextViewSystemInterface
+	private let client: TreeSitterClient
+	private let buffer = RangeInvalidationBuffer()
+	private let storageDelegate = TextStorageDelegate()
+
+#if os(iOS) || os(visionOS)
+	private var frameObservation: NSKeyValueObservation?
+	private var lastVisibleRange = NSRange.zero
+#endif
+
+	/// Create a instance.
+	///
+	/// This method will also invoke `observeEnclosingScrollView` if `textView` is within a scroll view. If not, you can invoke it directly after the view has been placed into a scroll view.
+	public init(
+		textView: TextView,
+		configuration: Configuration
+	) throws {
 		self.textView = textView
+		self.configuration = configuration
+		self.interface = TextViewSystemInterface(textView: textView, attributeProvider: configuration.attributeProvider)
+		self.client = try TreeSitterClient(
+			rootLanguageConfig: configuration.languageConfiguration,
+			configuration: .init(
+				languageProvider: configuration.languageProvider,
+				contentProvider: { [interface] in interface.languageLayerContent(with: $0) },
+				contentSnapshopProvider: { [interface] in interface.languageLayerContentSnapshot(with: $0) },
+				lengthProvider: { [interface] in interface.content.currentLength },
+				invalidationHandler: { [buffer] in buffer.invalidate(.set($0)) },
+				locationTransformer: configuration.locationTransformer
+			)
+		)
 
-		#if os(macOS)
-		guard let storage = textView.textStorage else {
-			preconditionFailure("TextView's storage is nil")
+		// this level of indirection is necessary so when the TextProvider is accessed it always uses the current version of the content
+		let tokenProvider = client.tokenProvider(with: { [interface] in
+			interface.content.string.predicateTextProvider($0, $1)
+		})
+
+		self.styler = TextSystemStyler(
+			textSystem: interface,
+			tokenProvider: tokenProvider
+		)
+
+		buffer.invalidationHandler = { [styler] in
+			styler.invalidate($0)
+
+			styler.validate()
 		}
-		#else
-		let storage = textView.textStorage
-		#endif
 
-		let textProvider: TreeSitterClient.TextProvider = { range, _ in
-			return storage.attributedSubstring(from: range).string
+		storageDelegate.willChangeContent = { [buffer, client] range, _ in
+			// a change happening, start buffering invalidations
+			buffer.beginBuffering()
+
+			client.willChangeContent(in: range)
 		}
 
-		let tokenProvider = client.tokenProvider(with: highlightQuery, textProvider: textProvider)
+		storageDelegate.didChangeContent = { [buffer, client, styler] range, delta in
+			let adjustedRange = NSRange(location: range.location, length: range.length - delta)
 
-		let interface = TextViewSystemInterface(textView: textView, attributeProvider: attributeProvider)
-		self.highlighter = Highlighter(textInterface: interface, tokenProvider: tokenProvider)
+			client.didChangeContent(in: adjustedRange, delta: delta)
+			styler.didChangeContent(in: adjustedRange, delta: delta)
 
-		super.init()
+			// At this point in mutation processing, it is unsafe to apply style changes. Ideally, we'd have a hook so we can know when it is ok. But, no such system exists for stock TextKit 1/2. So, instead we just let the runloop turn. This is *probably* safe, if the text does not change again, but can also result in flicker.
+			DispatchQueue.main.async {
+				buffer.endBuffering()
+			}
 
-		storage.delegate = self
+		}
 
-		#if os(macOS)
-		guard let scrollView = textView.enclosingScrollView else { return }
+		try textView.getTextStorage().delegate = storageDelegate
 
-		NotificationCenter.default.addObserver(self,
-											   selector: #selector(visibleContentChanged(_:)),
-											   name: NSView.frameDidChangeNotification,
-											   object: scrollView)
+		observeEnclosingScrollView()
 
-		NotificationCenter.default.addObserver(self,
-											   selector: #selector(visibleContentChanged(_:)),
-											   name: NSView.boundsDidChangeNotification,
-											   object: scrollView.contentView)
-		#else
-		highlighter.invalidate(.all)
-		#endif
-
-		treeSitterClient.invalidationHandler = { [weak self] in self?.handleInvalidation($0) }
+		invalidate(.all)
 	}
 
-	public convenience init(textView: TextView, language: Language, highlightQuery: Query, attributeProvider: @escaping TextViewSystemInterface.AttributeProvider) throws {
-		let client = try TreeSitterClient(language: language, transformer: { _ in return .zero })
-
-		try self.init(textView: textView, client: client, highlightQuery: highlightQuery, attributeProvider: attributeProvider)
+	/// Perform manual invalidation on the underlying highlighter
+	public func invalidate(_ target: RangeTarget) {
+		buffer.invalidate(target)
 	}
 
-	@objc private func visibleContentChanged(_ notification: NSNotification) {
-		highlighter.visibleContentDidChange()
-	}
-
-	private func handleInvalidation(_ set: IndexSet) {
-		// here is where an HighlightInvalidationBuffer could be handy. Unfortunately,
-		// a stock NSTextStorage/NSLayoutManager does not have sufficient callbacks
-		// to know when it is safe to mutate the text style.
-		DispatchQueue.main.async {
-			self.highlighter.invalidate(.set(set))
-		}
+	/// Inform the client that calls to languageConfiguration may change.
+	public func languageConfigurationChanged(for name: String) {
+		client.languageConfigurationChanged(for: name)
 	}
 }
 
-@available(macOS 11.0, iOS 15.0, tvOS 15.0, *)
-extension TextViewHighlighter: NSTextStorageDelegate {
-	public func textStorage(_ textStorage: NSTextStorage, willProcessEditing editedMask: TextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
-		treeSitterClient.willChangeContent(in: editedRange)
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+extension TextViewHighlighter {
+	/// Begin monitoring for containing scroll view changes.
+	///
+	/// This method sets up all the necessary monitoring so the highlighter can react to scrolling. It should be called only once the view heirarchy is fully established.
+	public func observeEnclosingScrollView() {
+#if os(macOS) && !targetEnvironment(macCatalyst)
+		guard let scrollView = textView.enclosingScrollView else {
+			print("warning: there is no enclosing scroll view")
+			return
+		}
+		
+		NotificationCenter.default.addObserver(
+			self,
+			selector: #selector(visibleContentChanged(_:)),
+			name: NSView.frameDidChangeNotification,
+			object: scrollView
+		)
+
+		NotificationCenter.default.addObserver(
+			self,
+			selector: #selector(visibleContentChanged(_:)),
+			name: NSView.boundsDidChangeNotification,
+			object: scrollView.contentView
+		)
+#elseif os(iOS) || os(visionOS)
+		self.frameObservation = textView.observe(\.contentOffset) { [weak self] view, _ in
+			MainActor.assumeIsolated {
+				guard let self = self else { return }
+
+				self.lastVisibleRange = self.textView.visibleTextRange
+
+				DispatchQueue.main.async {
+					guard self.textView.visibleTextRange == self.lastVisibleRange else { return }
+
+					self.styler.validate(.range(self.lastVisibleRange))
+				}
+			}
+		}
+#endif
 	}
 
-	public func textStorage(_ textStorage: NSTextStorage, didProcessEditing editedMask: TextStorageEditActions, range editedRange: NSRange, changeInLength delta: Int) {
-		let adjustedRange = NSRange(location: editedRange.location, length: editedRange.length - delta)
-		let string = textStorage.string
+	@objc private func visibleContentChanged(_ notification: NSNotification) {
+		let visibleRange = textView.visibleTextRange
 
-		highlighter.didChangeContent(in: adjustedRange, delta: delta)
-		treeSitterClient.didChangeContent(to: string, in: adjustedRange, delta: delta, limit: string.utf16.count)
+		styler.validate(.range(visibleRange))
 	}
 }
 

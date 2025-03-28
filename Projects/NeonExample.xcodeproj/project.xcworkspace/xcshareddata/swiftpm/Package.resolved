@@ -1,12 +1,12 @@
 {
+  "originHash" : "2de98472194b8e6dcd7467bb03cc243a4087294e5f04ad1708742bab9010c55a",
   "pins" : [
     {
-      "identity" : "neon",
+      "identity" : "nsui",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ChimeHQ/Neon.git",
+      "location" : "https://github.com/mattmassicotte/nsui.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "2e947934a75108a06fa42db84f69101d08a46f5c"
+        "revision" : "d7c7aedb5b6b69cc5561f25c5bb02214cd6101b5"
       }
     },
     {
@@ -14,8 +14,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ChimeHQ/Rearrange",
       "state" : {
-        "revision" : "8f97f721d8a08c6e01ab9f7460e53819bef72dfa",
-        "version" : "1.5.3"
+        "revision" : "f1d74e1642956f0300756ad8d1d64e9034857bc3",
+        "version" : "2.0.0"
       }
     },
     {
@@ -23,8 +23,26 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/ChimeHQ/SwiftTreeSitter",
       "state" : {
-        "revision" : "df25a52f72ebc5b50ae20d26d1363793408bb28b",
-        "version" : "0.7.1"
+        "branch" : "main",
+        "revision" : "8e38c786083a48b20ef7ab832d6abb019c3cea2b"
+      }
+    },
+    {
+      "identity" : "tree-sitter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/tree-sitter/tree-sitter",
+      "state" : {
+        "revision" : "d97db6d63507eb62c536bcb2c4ac7d70c8ec665e",
+        "version" : "0.23.2"
+      }
+    },
+    {
+      "identity" : "tree-sitter-markdown",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/MDeiml/tree-sitter-markdown",
+      "state" : {
+        "branch" : "split_parser",
+        "revision" : "44017499c51cb6431635ed51d5080e1fd05c2c21"
       }
     },
     {
@@ -33,9 +51,9 @@
       "location" : "https://github.com/alex-pinkus/tree-sitter-swift/",
       "state" : {
         "branch" : "with-generated-files",
-        "revision" : "041f27c244292cacedf00d6ab85377e27c21bbbb"
+        "revision" : "caa99d7d3c14aac03b5f16fc86fedf8755570760"
       }
     }
   ],
-  "version" : 2
+  "version" : 3
 }

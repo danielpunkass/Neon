@@ -1,35 +1,19 @@
 import Foundation
 
+import RangeState
+
 public protocol TextSystemInterface {
-    func clearStyle(in range: NSRange)
-    func applyStyle(to token: Token)
+    associatedtype Content: VersionedContent
 
-    var length: Int { get }
-    var visibleRange: NSRange { get }
+    @MainActor
+    func applyStyles(for application: TokenApplication)
+
+    @MainActor
+    var content: Content { get }
 }
 
-public extension TextSystemInterface {
-    func clearStyles(in set: IndexSet) {
-        for range in set.nsRangeView {
-            clearStyle(in: range)
-        }
-    }
+/// A function that translates a semantic `Token` into styling attributes.
+///
+/// This is also where theming could be taken into account.
+public typealias TokenAttributeProvider = (Token) -> [NSAttributedString.Key: Any]
 
-    func clearAllStyles() {
-        clearStyle(in: NSRange(0..<length))
-    }
-
-    func applyStyles(to tokens: [Token]) {
-        for token in tokens {
-            applyStyle(to: token)
-        }
-    }
-
-    func apply(_ tokenApplication: TokenApplication, to set: IndexSet) {
-        if tokenApplication.action == .replace {
-            clearStyles(in: set)
-        }
-
-        applyStyles(to: tokenApplication.tokens)
-    }
-}
