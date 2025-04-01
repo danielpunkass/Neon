@@ -27,7 +27,7 @@ extension TokenApplication {
 	}
 }
 
-@available(macOS 13.0, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+@available(macOS 10.15, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension TreeSitterClient {
 	@MainActor
 	public func tokenProvider(with provider: @escaping TextProvider, nameMap: [String : String] = [:]) -> TokenProvider {
@@ -69,7 +69,26 @@ extension TextViewSystemInterface {
 	}
 }
 
-@available(macOS 13.0, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+#if USE_ATTRIBUTED_STRING
+
+public typealias NeonAttributedString = AttributedString
+
+#else
+
+public typealias NeonAttributedString = NSMutableAttributedString
+
+extension NSAttributedString {
+
+	public convenience init(stringLiteral value: String)
+	{
+		self.init(string: value)
+	}
+
+}
+
+#endif
+
+@available(macOS 10.15, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension TreeSitterClient {
 	/// Highlight an input string.
 	public static func highlight(
@@ -77,7 +96,7 @@ extension TreeSitterClient {
 		attributeProvider: TokenAttributeProvider,
 		rootLanguageConfig: LanguageConfiguration,
 		languageProvider: @escaping LanguageLayer.LanguageProvider
-	) async throws -> AttributedString {
+	) async throws -> NeonAttributedString {
 		let content = LanguageLayer.ContentSnapshot(string: string)
 		let length = string.utf16.count
 
@@ -96,14 +115,19 @@ extension TreeSitterClient {
 
 		let ranges = try await client.highlights(in: NSRange(0..<length), provider: content.textProvider)
 
-		var attributedString = AttributedString(stringLiteral: string)
+		var attributedString = NeonAttributedString(stringLiteral: string)
 
 		for range in ranges {
 			let token = Token(name: range.name, range: range.range)
 			let attrs = attributeProvider(token)
+#if USE_ATTRIBUTED_STRING
 			guard let strRange = Range<AttributedString.Index>(token.range, in: attributedString) else { continue }
-
 			attributedString[strRange].foregroundColor = attrs[.foregroundColor] as? PlatformColor
+#else
+			if let color = attrs[.foregroundColor] as? PlatformColor {
+				attributedString.setAttributes([.foregroundColor: color], range: token.range)
+			}
+#endif
 		}
 
 		return attributedString

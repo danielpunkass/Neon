@@ -5,7 +5,7 @@ import SwiftTreeSitter
 import TreeSitterClient
 import NeonTestsTreeSitterSwift
 
-@available(macOS 13.0, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+@available(macOS 10.15, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 final class TreeSitterClientTests: XCTestCase {
 	@MainActor
 	func testSynchronousQuery() throws {

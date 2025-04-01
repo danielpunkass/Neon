@@ -190,7 +190,7 @@ let attrProvider: TokenAttributeProvider = { token in
     return [.foregroundColor: NSColor.red]
 }
 
-// produce an AttributedString
+// produce an NeonAttributedString
 let highlightedSource = try await TreeSitterClient.highlight(
     string: source,
     attributeProvider: attrProvider,

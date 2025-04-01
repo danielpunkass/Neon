@@ -8,7 +8,7 @@ enum BackgroundingLanguageLayerTreeError: Error {
 	case unableToSnapshot
 }
 
-@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 final class BackgroundingLanguageLayerTree {
 	public static let synchronousLengthThreshold = 2048
 	public static let synchronousDocumentSize = 2048*512
@@ -102,7 +102,7 @@ final class BackgroundingLanguageLayerTree {
 	}
 }
 
-@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension BackgroundingLanguageLayerTree {
 	public func executeQuery(_ queryDef: Query.Definition, in set: IndexSet) throws -> LanguageTreeQueryCursor {
 		guard let tree = accessTreeSynchronously(version: currentVersion) else {
@@ -132,7 +132,7 @@ extension BackgroundingLanguageLayerTree {
 	}
 }
 
-@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension BackgroundingLanguageLayerTree {
 	public func resolveSublayers(with content: LanguageLayer.Content, in set: IndexSet) throws -> IndexSet {
 		guard let tree = accessTreeSynchronously(version: currentVersion) else {
