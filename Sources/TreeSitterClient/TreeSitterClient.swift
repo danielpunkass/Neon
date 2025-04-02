@@ -19,9 +19,8 @@ enum TreeSitterClientError: Error {
 /// Tree-sitter ultimately resolves to a single semantic view of the text, and is considered a single phase. However, it may require numerous validation/invalidation passes before fully resolving a document's content.
 ///
 /// Today, compiler limitations mean that this type must be MainActor. But I'm hoping that one can I can figure out how to lift that limitation.
-@preconcurrency
 @MainActor
-@available(macOS 10.15, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
+@preconcurrency
 public final class TreeSitterClient {
 	public typealias TextProvider = SwiftTreeSitter.Predicate.TextProvider
 	/// Produces synchronously-accessible content that covers the range of `0..<Argument`.
@@ -147,7 +146,7 @@ public final class TreeSitterClient {
 	/// - Parameter range: the range that was affected by the edit
 	/// - Parameter delta: the change in length of the content
 	public func didChangeContent(in range: NSRange, delta: Int) {
-		rangeProcessor.didChangeContent(in: range, delta: delta)
+		rangeProcessor.didChangeContent(in: range, delta: delta, isolation: MainActor.shared)
 		sublayerValidator.contentChanged(in: range, delta: delta)
 		versionedContent.contentChanged()
 	}
@@ -168,7 +167,7 @@ public final class TreeSitterClient {
 	}
 
 	private var maximumProcessedContent: LanguageLayer.Content {
-		if let content = configuration.contentProvider?(rangeProcessor.maximumProcessedLocation ?? 0) {
+		if let content = configuration.contentProvider?(rangeProcessor.processedUpperBound) {
 			return content
 		}
 
@@ -176,11 +175,10 @@ public final class TreeSitterClient {
 	}
 
 	private var maximumProcessedContentSnapshot: LanguageLayer.ContentSnapshot {
-		configuration.contentSnapshotProvider(rangeProcessor.maximumProcessedLocation ?? 0)
+		configuration.contentSnapshotProvider(rangeProcessor.processedUpperBound)
 	}
 }
 
-@available(macOS 10.15, macCatalyst 16.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension TreeSitterClient {
 	private var hasPendingChanges: Bool {
 		rangeProcessor.hasPendingChanges
@@ -212,7 +210,6 @@ extension TreeSitterClient {
 	}
 }
 
-@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension TreeSitterClient {
 	private func resolveSublayers(in range: NSRange) -> Bool {
 		guard self.canAttemptSynchronousAccess(in: .range(range)) else {
@@ -289,10 +286,9 @@ extension TreeSitterClient {
 	}
 }
 
-@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension TreeSitterClient {
-	@preconcurrency
 	@MainActor
+	@preconcurrency
 	public struct ClientQueryParams {
 		public let indexSet: IndexSet
 		public let textProvider: TextProvider
@@ -315,8 +311,8 @@ extension TreeSitterClient {
 		}
 	}
 
-	@preconcurrency
 	@MainActor
+	@preconcurrency
 	public struct ClientQuery {
 		public let query: Query.Definition
 		public let params: ClientQueryParams
@@ -341,7 +337,7 @@ extension TreeSitterClient {
 	}
 
 	private func executeQuery(_ clientQuery: ClientQuery) async throws -> some Sequence<QueryMatch> {
-		rangeProcessor.processLocation(clientQuery.params.maxLocation, mode: clientQuery.params.mode)
+		rangeProcessor.processLocation(clientQuery.params.maxLocation, mode: clientQuery.params.mode, isolation: MainActor.shared)
 
 		await rangeProcessor.processingCompleted(isolation: MainActor.shared)
 
@@ -374,7 +370,6 @@ extension TreeSitterClient {
 	}
 }
 
-@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension TreeSitterClient {
 	/// Execute a standard highlights.scm query.
 	public func highlights(in set: IndexSet, provider: @escaping TextProvider, mode: RangeFillMode = .required) async throws -> [NamedRange] {

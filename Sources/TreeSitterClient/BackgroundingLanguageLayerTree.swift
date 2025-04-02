@@ -8,7 +8,6 @@ enum BackgroundingLanguageLayerTreeError: Error {
 	case unableToSnapshot
 }
 
-@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 final class BackgroundingLanguageLayerTree {
 	public static let synchronousLengthThreshold = 2048
 	public static let synchronousDocumentSize = 2048*512
@@ -34,7 +33,7 @@ final class BackgroundingLanguageLayerTree {
 	}
 
 	private let queue = DispatchQueue(label: "com.chimehq.BackgroundingLanguageLayerTree")
-	private var currentVersion = 0
+//	private var currentVersion = 0
 	private var committedVersion = 0
 	private var pendingOldPoint: Point?
 	private let configuration: Configuration
@@ -47,10 +46,6 @@ final class BackgroundingLanguageLayerTree {
 		let rootLayer = try LanguageLayer(languageConfig: rootLanguageConfig, configuration: configuration.layerConfiguration)
 
 		self.backgroundProcessor = BackgroundProcessor(value: rootLayer)
-	}
-
-	private func accessTreeSynchronously(version: Int) -> LanguageLayer? {
-		backgroundProcessor.accessValueSynchronously()
 	}
 
 	public func willChangeContent(in range: NSRange) {
@@ -102,14 +97,15 @@ final class BackgroundingLanguageLayerTree {
 	}
 }
 
-@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension BackgroundingLanguageLayerTree {
 	public func executeQuery(_ queryDef: Query.Definition, in set: IndexSet) throws -> LanguageTreeQueryCursor {
-		guard let tree = accessTreeSynchronously(version: currentVersion) else {
-			throw BackgroundingLanguageLayerTreeError.unavailable
+		return try backgroundProcessor.accessValueSynchronously() { layer in
+			guard let layer else {
+				throw BackgroundingLanguageLayerTreeError.unavailable
+			}
+			
+			return try layer.executeQuery(queryDef, in: set)
 		}
-
-		return try tree.executeQuery(queryDef, in: set)
 	}
 
 	public func executeQuery(_ queryDef: Query.Definition, in set: IndexSet, isolation: isolated (any Actor)) async throws -> [QueryMatch] {
@@ -132,14 +128,15 @@ extension BackgroundingLanguageLayerTree {
 	}
 }
 
-@available(macOS 10.15, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension BackgroundingLanguageLayerTree {
 	public func resolveSublayers(with content: LanguageLayer.Content, in set: IndexSet) throws -> IndexSet {
-		guard let tree = accessTreeSynchronously(version: currentVersion) else {
-			throw BackgroundingLanguageLayerTreeError.unavailable
+		return try backgroundProcessor.accessValueSynchronously() { layer in
+			guard let layer else {
+				throw BackgroundingLanguageLayerTreeError.unavailable
+			}
+			
+			return try layer.resolveSublayers(with: content, in: set)
 		}
-
-		return try tree.resolveSublayers(with: content, in: set)
 	}
 
 	public func resolveSublayers(with snapshot: LanguageLayer.ContentSnapshot, in set: IndexSet, isolation: isolated (any Actor)) async throws -> IndexSet {
