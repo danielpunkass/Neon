@@ -69,25 +69,6 @@ extension TextViewSystemInterface {
 	}
 }
 
-#if USE_ATTRIBUTED_STRING
-
-public typealias NeonAttributedString = AttributedString
-
-#else
-
-public typealias NeonAttributedString = NSMutableAttributedString
-
-extension NSAttributedString {
-
-	public convenience init(stringLiteral value: String)
-	{
-		self.init(string: value)
-	}
-
-}
-
-#endif
-
 @available(macOS 12, macCatalyst 15, iOS 15, tvOS 15, watchOS 8, *)
 extension TreeSitterClient {
 	/// Highlight an input string.
@@ -96,7 +77,7 @@ extension TreeSitterClient {
 		attributeProvider: TokenAttributeProvider,
 		rootLanguageConfig: LanguageConfiguration,
 		languageProvider: @escaping LanguageLayer.LanguageProvider
-	) async throws -> NeonAttributedString {
+	) async throws -> AttributedString {
 		let content = LanguageLayer.ContentSnapshot(string: string)
 		let length = string.utf16.count
 
@@ -115,19 +96,13 @@ extension TreeSitterClient {
 
 		let ranges = try await client.highlights(in: NSRange(0..<length), provider: content.textProvider)
 
-		var attributedString = NeonAttributedString(stringLiteral: string)
+		var attributedString = AttributedString(stringLiteral: string)
 
 		for range in ranges {
 			let token = Token(name: range.name, range: range.range)
 			let attrs = attributeProvider(token)
-#if USE_ATTRIBUTED_STRING
 			guard let strRange = Range<AttributedString.Index>(token.range, in: attributedString) else { continue }
 			attributedString[strRange].foregroundColor = attrs[.foregroundColor] as? PlatformColor
-#else
-			if let color = attrs[.foregroundColor] as? PlatformColor {
-				attributedString.setAttributes([.foregroundColor: color], range: token.range)
-			}
-#endif
 		}
 
 		return attributedString
