@@ -68,7 +68,12 @@ extension TreeSitterClient {
 		// Invokes a query for the given layer and recurses on any subLayers
 		func requestTokens(for layer: TreeSitterParseLayer) {
 			if let query = layer.baseLanguage.highlightingQuery {
-				for tree in layer.trees {
+				// A layer holding many trees (one per injected block) only needs the trees that overlap
+				// the requested range; the query cursor's range would discard everything from the rest.
+				// Only layers with multiple trees are filtered: those trees are replaced on reparse
+				// rather than edited in place, so reading their root nodes here doesn't race an edit.
+				let trees = layer.trees.count > 1 ? layer.trees.filter { $0.intersects(range) } : layer.trees
+				for tree in trees {
 					waitingGroup.enter()
 					
 					executeResolvingQuery(query, in: range, of: layer, with: tree, executionMode: executionMode, textProvider: textProvider) { cursorResult in
@@ -112,5 +117,15 @@ extension TreeSitterClient {
 				completionHandler(tokenApp)
 			}
 		}
+	}
+}
+
+private extension Tree {
+	/// True if the tree's root node touches `range`. Adjacent ranges count as touching,
+	/// so that a token ending exactly at the start of the range is never missed.
+	func intersects(_ range: NSRange) -> Bool {
+		guard let rootRange = rootNode?.range else { return false }
+
+		return rootRange.location <= range.max && range.location <= rootRange.max
 	}
 }

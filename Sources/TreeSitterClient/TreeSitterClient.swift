@@ -338,15 +338,26 @@ extension TreeSitterClient {
             // .. so at the state could be mutated at at any point. But,
             // let's be optimistic and only check once at the end.
 
+            // Only the tree being queried needs to be isolated from concurrent edits. Copying
+            // the whole layer here cost O(trees in layer) per query, and because a highlighting
+            // request issues one query per tree, large documents with many injected trees
+            // spent nearly all their highlighting time copying trees they never queried.
             self.semaphore.wait()
-            let layerCopy = layer.copy()
+            let treeCopy = tree.copy()
             self.semaphore.signal()
+
+            guard let treeCopy = treeCopy else {
+                OperationQueue.main.addOperation {
+                    completionHandler(.failure(.stateInvalid))
+                }
+                return
+            }
 
             DispatchQueue.global().async {
                 let result = self.executeResolvingQuerySynchronouslyWithoutCheck(query,
                                                                                  in: range,
-																				 of: layerCopy,
-																				 with: tree)
+																				 of: layer,
+																				 with: treeCopy)
                 if case .success(let cursor) = result, prefetchMatches {
                     cursor.prefetchMatches()
                 }
