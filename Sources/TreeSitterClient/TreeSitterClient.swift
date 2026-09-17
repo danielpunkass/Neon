@@ -53,6 +53,18 @@ public final class TreeSitterClient {
     private let semaphore: DispatchSemaphore
     private let synchronousLengthThreshold: Int
 
+    // The number of asynchronous edits that have been queued but not yet started on `queue`.
+    // Written from the main queue and read from `queue`, so it is guarded by its own lock
+    // rather than `semaphore`, which is held for the duration of a parse.
+    private let queuedEditCountLock = NSLock()
+    private var queuedEditCount = 0
+
+    // While queued edits are being coalesced, these carry the state from before the first
+    // unparsed edit, and the ranges affected by every edit since, to the edit that finally
+    // parses. The state is guarded by `semaphore`; the ranges are only accessed on `queue`.
+    private var stateBeforeUnparsedEdits: TreeSitterParseLayer?
+    private var rangesAffectedByUnparsedEdits = IndexSet()
+
     // This was roughly determined to be the limit in characters
     // before it's likely that tree-sitter edit processing
     // and tree-diffing will start to become noticeably laggy
@@ -184,7 +196,8 @@ extension TreeSitterClient {
 
     private func applyEdit(_ edit: ContentEdit, readHandler: @escaping Parser.ReadBlock) -> (TreeSitterParseLayer, TreeSitterParseLayer) {
         self.semaphore.wait()
-		let oldState = self.baseLayer.copy()
+		let oldState = self.stateBeforeUnparsedEdits ?? self.baseLayer.copy()
+		self.stateBeforeUnparsedEdits = nil
 
 		self.baseLayer.applyEdit(edit.inputEdit)
 
@@ -212,9 +225,35 @@ extension TreeSitterClient {
     private func processEditAsync(_ edit: ContentEdit, withInvalidations doInvalidations: Bool, readHandler: @escaping Parser.ReadBlock, completionHandler: @escaping () -> Void) {
         outstandingEdits.append(edit)
 
+        queuedEditCountLock.lock()
+        queuedEditCount += 1
+        queuedEditCountLock.unlock()
+
         queue.async {
-            let (oldState, newState) = self.applyEdit(edit, readHandler: readHandler)
-			let set = doInvalidations ? self.computeInvalidatedSet(from: oldState, to: newState, with: edit) : IndexSet()
+            self.queuedEditCountLock.lock()
+            self.queuedEditCount -= 1
+            let newerEditIsQueued = self.queuedEditCount > 0
+            self.queuedEditCountLock.unlock()
+
+            // A full parse reflects the whole document, so when a newer edit is already waiting,
+            // parsing now only produces a state that is immediately replaced. Typing into a
+            // large document queues an edit per keystroke, and parsing each one in turn let the
+            // queue fall arbitrarily far behind. Instead, apply this edit to the tree and leave
+            // the parse to the newest queued edit, whose read handler sees the latest content.
+            var set = IndexSet()
+            if newerEditIsQueued {
+                self.applyEditWithoutParsing(edit)
+            }
+            else {
+                let (oldState, newState) = self.applyEdit(edit, readHandler: readHandler)
+                if doInvalidations {
+                    set = self.computeInvalidatedSet(from: oldState, to: newState, with: edit)
+
+                    // Include the edits that were coalesced into this parse, if any
+                    set.insert(ranges: self.rangesAffectedByUnparsedEdits.nsRangeView.compactMap({ $0.clamped(to: edit.limit) }))
+                }
+                self.rangesAffectedByUnparsedEdits.removeAll()
+            }
 
 			OperationQueue.main.addOperation {
 				let completedEdit = self.outstandingEdits.removeFirst()
@@ -226,6 +265,22 @@ extension TreeSitterClient {
 				completionHandler()
 			}
         }
+    }
+
+    /// Applies an edit to the base layer's trees without reparsing, remembering what the
+    /// eventual parse needs in order to report everything that changed since the last one.
+    /// Must be called on `queue`.
+    private func applyEditWithoutParsing(_ edit: ContentEdit) {
+        self.semaphore.wait()
+        if self.stateBeforeUnparsedEdits == nil {
+            self.stateBeforeUnparsedEdits = self.baseLayer.copy()
+        }
+        self.baseLayer.applyEdit(edit.inputEdit)
+        self.semaphore.signal()
+
+        // Earlier edits' ranges are in the coordinates of the content at the time, so later
+        // edits can leave them slightly offset. They are only used to widen invalidation.
+        self.rangesAffectedByUnparsedEdits.insert(range: edit.affectedRange)
     }
 
     func computeInvalidatedSet(from oldState: TreeSitterParseLayer, to newState: TreeSitterParseLayer, with edit: ContentEdit) -> IndexSet {
